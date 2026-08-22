@@ -94,7 +94,9 @@ Rails.application.config.to_prepare do
   # top of that view file for sync requirements.
   plugin_views_dir = File.expand_path("../../app/views", __dir__)
   if Dir.exist?(plugin_views_dir)
-    Rails.application.config.view_paths.unshift(plugin_views_dir)
+    # ActionController::Base.prepend_view_path mutates the controller's
+    # view_paths in place (it has done so since Rails 3) and is the
+    # supported way to extend view lookup from a gem / plugin.
     ActionController::Base.prepend_view_path(plugin_views_dir)
     Rails.logger.info "[manyfold_printables] view path prepended: #{plugin_views_dir}"
   end
