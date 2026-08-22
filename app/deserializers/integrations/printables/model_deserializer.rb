@@ -215,6 +215,34 @@ class Integrations::Printables::ModelDeserializer < Integrations::Printables::Ba
     false
   end
 
+  # GET-download a file from a Printables URL, optionally authenticated via
+  # a session cookie. Many newer prints (since ~2024) live behind Printables'
+  # authenticated download flow: the URL we derive is publicly accessible
+  # but returns 404 without a valid session cookie, and 200 with one.
+  #
+  # To enable this, set PRINTABLES_SESSION_COOKIE to your printables.com
+  # session cookie value (get it from your browser's dev tools → Network →
+  # any printables.com request → Cookie header). The plugin will pass it
+  # on every file download attempt.
+  #
+  # Returns the file content (binary String), or nil if the download fails.
+  def download_file(url)
+    uri = URI.parse(url)
+    http = Net::HTTP.new(uri.host, uri.port)
+    http.use_ssl = (uri.scheme == "https")
+    http.open_timeout = 10
+    http.read_timeout = 60
+    req = Net::HTTP::Get.new(uri.request_uri)
+    req["User-Agent"] = "Manyfold/#{ManyfoldPrintables::VERSION} (+manyfold_printables plugin)"
+    cookie = ENV["PRINTABLES_SESSION_COOKIE"].to_s
+    req["Cookie"] = cookie unless cookie.empty?
+    resp = http.request(req)
+    return nil unless resp.code.to_i.between?(200, 299)
+    resp.body
+  rescue StandardError
+    nil
+  end
+
   def preview_filename_from(data)
     return nil unless data["image"].is_a?(Hash)
     path = data["image"]["filePath"]
