@@ -17,15 +17,23 @@
 Rails.application.config.after_initialize do
   next if Rails.env.test?
 
+  Rails.logger.info "[manyfold_printables] initializer running"
+
   # Force-load the deserializer classes. They live under our plugin's
   # app/deserializers/ directory, which is NOT in Rails' main autoload paths,
   # so Zeitwerk can't auto-discover them. Without these requires, the
   # constants referenced below would NameError at boot. The constant check
   # is so the plugin's own tests (which pre-load stubs) don't double-require.
   unless defined?(Integrations::Printables::BaseDeserializer)
-    require_relative "../../app/deserializers/integrations/printables/base_deserializer"
-    require_relative "../../app/deserializers/integrations/printables/model_deserializer"
-    require_relative "../../app/deserializers/integrations/printables/creator_deserializer"
+    begin
+      require_relative "../../app/deserializers/integrations/printables/base_deserializer"
+      require_relative "../../app/deserializers/integrations/printables/model_deserializer"
+      require_relative "../../app/deserializers/integrations/printables/creator_deserializer"
+      Rails.logger.info "[manyfold_printables] deserializer classes loaded"
+    rescue => e
+      Rails.logger.error "[manyfold_printables] FAILED to load deserializer classes: #{e.class}: #{e.message}"
+      raise
+    end
   end
 
   printables_deserializer_classes = [
@@ -42,6 +50,7 @@ Rails.application.config.after_initialize do
         super(url: url, for_class: for_class)
     end
   end)
+  Rails.logger.info "[manyfold_printables] Link#deserializer_for prepended with #{printables_deserializer_classes.size} classes"
 
   # ---------------------------------------------------------------------------
   # View-rendering workaround.
@@ -54,15 +63,51 @@ Rails.application.config.after_initialize do
   #
   #   ArgumentError (wrong number of arguments (given 0, expected 1))
   #
-  # The link sync itself works fine via CreateObjectFromUrlJob / re-import,
-  # so we disable the per-link resync button just for our deserializers to
-  # avoid the 500. If Manyfold later exposes a PluginManager.register_deserializer
-  # API or fixes the Phlex interaction, this override can be dropped.
-  Link.prepend(Module.new do
-    def deserializer
-      result = super
-      return nil if result.is_a?(Integrations::Printables::BaseDeserializer)
-      result
+  # Important: `Link#deserializer` is used for TWO unrelated purposes:
+  #   1. UpdateMetadataFromLinkJob (needs our deserializer to actually sync)
+  #   2. Components::LinkList view rendering (currently 500s for our links)
+  #
+  # If we make `Link#deserializer` return nil for our deserializers, the sync
+  # job silently no-ops. Instead, we patch ONLY LinkList#view_template so the
+  # broken `policy(...)` branch is skipped for our links. The sync path is
+  # left untouched; users can resync by re-pasting the URL on the Imports
+  # page.
+  #
+  # If Manyfold later exposes PluginManager.register_deserializer or fixes
+  # the Phlex interaction, this override can be dropped.
+  Rails.application.config.to_prepare do
+    if defined?(Components::LinkList)
+      Components::LinkList.prepend(Module.new do
+        def view_template
+          return if @links.empty?
+          ul class: "list-unstyled" do
+            @links.each do |link|
+              next unless link.valid?
+              li do
+                Icon(icon: "link-45deg", role: "presentation") if @icons
+                whitespace
+                link_to(
+                  sanitize(link.text) || t("sites.%{site}" % {site: link.site}, default: "%{site}" % {site: link.site}),
+                  link.url,
+                  rel: "noreferrer"
+                )
+                # Skip the broken `policy(link.linkable).sync?` call for
+                # Printables deserializer instances. The "sync" button is
+                # suppressed for those links; re-import on /imports/new to
+                # refresh.
+                next if link.deserializer.is_a?(Integrations::Printables::BaseDeserializer)
+                if link.deserializer.present? && policy(link.linkable).sync?
+                  whitespace
+                  link_to({action: "sync", id: link.linkable, link: link.id}, {method: :post}) do
+                    Icon(icon: "arrow-repeat", label: t("components.link_list.sync"))
+                  end
+                  Icon(icon: "exclamation-triangle-fill") if link.problems.exists?
+                end
+              end
+            end
+          end
+        end
+      end)
     end
-  end)
+  end
 end
