@@ -143,17 +143,18 @@ class Integrations::Printables::ModelDeserializer < Integrations::Printables::Ba
         next unless !f["name"].to_s.empty? && !f["filePreviewPath"].to_s.empty?
         url = derived_file_url(f["filePreviewPath"], f["name"])
         next unless url
-        # The CDN only publicly serves files whose preview path is under a
-        # kind-specific directory (e.g. /stls/, /slas/, /gcodes/). When the
-        # preview path is under /previews/ (general previews), the CDN only
-        # has the preview PNG, not the real file — so derived URLs return 404
-        # silently in Manyfold and produce broken ModelFile rows. To avoid
-        # that, HEAD-check each candidate URL synchronously and skip 404s.
+        # The CDN only publicly serves files whose preview path translates
+        # to a working download URL. Many newer prints use a UUID-based
+        # CDN layout (`media/prints/<uuid>/previews/<uuid>.png`) where the
+        # actual file is NOT publicly downloadable — the website only
+        # serves it through an authenticated download flow. HEAD-check
+        # each candidate URL synchronously and skip 404s with a clear
+        # log line so the user knows why files were skipped.
         unless url_exists?(url)
           Rails.logger.info(
             "[manyfold_printables] skipping #{f['name']}: " \
-            "preview path #{f['filePreviewPath']} is not under a kind-specific " \
-            "CDN directory (file is not publicly downloadable from printables.com)"
+            "CDN URL returned 404 — file is not publicly downloadable from printables.com " \
+            "(preview path: #{f['filePreviewPath']})"
           )
           next
         end
@@ -173,16 +174,26 @@ class Integrations::Printables::ModelDeserializer < Integrations::Printables::Ba
   end
 
   # The GraphQL response gives us filePreviewPath (a path on media.printables.com)
-  # but not the absolute download URL for the real file. The CDN layout for a
-  # true `.stl` / `.sla` / `.gcode` is:
-  #   media/prints/<id>/<kind>/<uuid>/<basename>_preview.<preview-ext>
-  # and the real file is at the same path with `_preview.<ext>` replaced by the
-  # actual filename. For `.stp` / `.3mf` / `.obj` (and other 3D formats) the
-  # preview path is sometimes under `/stls/`, sometimes under `/previews/`;
-  # only the `/stls/`, `/slas/`, `/gcodes/` variants are actually downloadable.
+  # but not the absolute download URL for the real file. Printables has used
+  # several CDN layouts over time:
+  #
+  #   Old layout (still works for some prints):
+  #     media/prints/<id>/<kind>/<uuid>/<basename>_preview.<ext>
+  #     → real file: media/prints/<id>/<kind>/<uuid>/<basename><ext>
+  #
+  #   New layout (most prints since ~2024):
+  #     media/prints/<uuid>/previews/<uuid>.png
+  #     → real file: NOT publicly downloadable from the CDN. The website
+  #       serves it only through an authenticated download flow. Any URL we
+  #       derive from this layout will 404.
+  #
+  # We always derive the URL by stripping "_preview.<ext>" from the preview
+  # path and substituting the real filename's extension. We do NOT filter on
+  # the directory: the synchronous HEAD check below is the single source of
+  # truth. Filtering by directory (as an earlier version did) silently
+  # dropped every file for newer prints because they all live under /previews/.
   def derived_file_url(file_preview_path, real_filename)
     return nil if file_preview_path.to_s.empty? || real_filename.to_s.empty?
-    return nil unless KNOWN_PREVIEW_DIRS.any? { |dir| file_preview_path.include?(dir) }
     dir = file_preview_path.sub(%r{/[^/]+\z}, "")
     extension = File.extname(real_filename)
     base = File.basename(real_filename, extension)

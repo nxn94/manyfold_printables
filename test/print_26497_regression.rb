@@ -35,6 +35,19 @@ module Faraday
 end
 module ManyfoldPrintables; VERSION = "0.1.0"; end
 
+# Stub Rails.logger so the deserializer's skip messages don't crash the test
+module Rails
+  def self.logger
+    @logger ||= Class.new {
+      def initialize; @messages = []; end
+      def info(m); @messages << m; end
+      def warn(m); @messages << m; end
+      def error(m); @messages << m; end
+      def messages; @messages; end
+    }.new
+  end
+end
+
 PLUGIN = File.expand_path("../app/deserializers/integrations/printables", __dir__)
 require "#{PLUGIN}/base_deserializer.rb"
 require "#{PLUGIN}/model_deserializer.rb"

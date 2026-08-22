@@ -22,14 +22,6 @@ module Integrations::Printables
       "9" => nil                  # (Printables-internal / non-SPDX, treat as unknown)
     }.freeze
 
-    # File kinds Printables' GraphQL exposes under the `stls` array. The `stls`
-    # array is not strictly `.stl` only — it can include `.stp` (STEP), `.3mf`,
-    # `.obj`, etc. We accept the entry based on its preview-path directory, not
-    # its declared kind, because the directory reflects what the CDN actually
-    # serves. Anything not under one of these directories is skipped (its
-    # download URL can't be derived).
-    KNOWN_PREVIEW_DIRS = %w[/stls/ /slas/ /gcodes/].freeze
-
     # Path patterns for the two kinds of URLs we accept:
     #   https://www.printables.com/model/46705
     #   https://www.printables.com/model/46705-battery-tray-16x-aa-16x-aaa-4x-cr2032

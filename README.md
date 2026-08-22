@@ -9,18 +9,26 @@ an existing model via a **Link**) and Manyfold will fetch the metadata, cover
 image, and downloadable 3D files (STL / SLA / gcode) directly from
 Printables' public GraphQL API.
 
-> **⚠️ File format limitation**
+> **⚠️ File format / availability limitation**
 >
 > Printables' public CDN (`media.printables.com`) only serves files for
-> **`.stl`**, **`.sla`**, and **`.gcode`**. For prints that offer only
-> other formats (`.3mf`, `.stp`, `.obj`, …) the metadata, tags, license,
-> images, and creator are still imported correctly, **but the actual
-> 3D file is not**. For those prints you'll need to download the file
-> manually from printables.com in your browser and upload it to Manyfold.
+> **some** prints. **Older prints** (those uploaded before ~2024) use
+> a layout where `.stl`, `.sla`, and `.gcode` files are publicly
+> downloadable. **Newer prints** use a different CDN layout where the
+> actual file is only accessible via Printables' authenticated website
+> download flow — there is no public CDN URL we can derive from the
+> GraphQL response.
 >
-> Why: Printables serves `.3mf` / `.stp` / `.obj` files only through their
-> authenticated web download flow — there is no public CDN URL we can
-> derive from the GraphQL response. This is a Printables platform
+> The plugin tries to download every file and silently skips any that
+> the CDN rejects with a log line like
+> `[manyfold_printables] skipping funnel.stl: CDN URL returned 404...`.
+> For prints whose files can't be auto-downloaded, **metadata, tags,
+> license, images, and creator are still imported correctly** — only
+> the actual 3D file is missing. Download it manually from
+> printables.com in your browser and upload it to Manyfold.
+>
+> Why: Printables has migrated many prints to an authenticated download
+> flow for copyright / abuse reasons. This is a Printables platform
 > limitation, not a plugin limitation.
 
 ## What it does
@@ -111,19 +119,24 @@ with that registration.
    been removed. The plugin uses only fields that have been verified against
    the live schema. If a field is renamed, update `PRINT_QUERY` /
    `USER_QUERY` accordingly and release a new version.
-2. **Not all printable file formats can be downloaded from Printables' CDN.**
-   Printables' public CDN (`media.printables.com`) only serves files for
-   `.stl`, `.sla`, and `.gcode` under their kind-specific directories
-   (`/stls/`, `/slas/`, `/gcodes/`). Other formats (`.3mf`, `.stp`, `.obj`, …)
-   have their preview path under `/previews/` and the actual file is only
-   available through Printables' authenticated web download flow.
-   The plugin HEAD-checks each candidate URL and silently skips 404s with
-   a log line like `[manyfold_printables] skipping thing.3mf: ... file is
-   not publicly downloadable from printables.com`. For prints whose only
-   printable file is a 3MF (or similar non-STL format), you'll need to
-   download the file manually from printables.com and upload it to
-   Manyfold — metadata, tags, images, license, and creator will still be
-   imported correctly.
+2. **Not all Printables prints have publicly-downloadable files.**
+   Printables has two CDN layouts in production:
+     - *Old layout*: `media/prints/<id>/<kind>/<uuid>/<basename>_preview.<ext>`
+       → real file is publicly downloadable at the same path with
+       `_preview.<ext>` replaced by the real filename.
+     - *New layout (~2024+)*: `media/prints/<uuid>/previews/<uuid>.png` →
+       the actual file is **NOT** publicly downloadable from the CDN. The
+       website only serves it through an authenticated download flow.
+   The plugin HEAD-checks every candidate URL synchronously and skips
+   404s with a log line like
+   `[manyfold_printables] skipping thing.stl: CDN URL returned 404 ...`.
+   This is observable in the docker logs — every skipped file is logged
+   with its name and preview path so you can confirm whether the print
+   simply has unsupported formats (3MF, STP, OBJ) or whether it's a
+   newer print that's behind Printables' authenticated download flow.
+   For either case, download the file manually from printables.com and
+   upload it to Manyfold — metadata, tags, images, license, and creator
+   will still be imported correctly.
 3. **Creator URL → numeric ID** requires one HTML fetch to resolve the
    `@handle` to the internal user id (Printables doesn't expose a
    handle-based GraphQL lookup). If that page returns a Cloudflare challenge
