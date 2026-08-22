@@ -215,14 +215,21 @@ class Integrations::Printables::ModelDeserializer < Integrations::Printables::Ba
   # Strips non-word chars and replaces whitespace with dashes, then collapses
   # repeated dashes and trims leading/trailing dashes.
   #
-  # Uses a non-backtracking approach (String#tr + String#squeeze + String#strip
-  # + Range#delete_at style) to avoid the polynomial-regex DoS flagged by
-  # GitHub code scanning. The previous gsub-based version had nested
-  # quantified alternations (`[^a-z0-9]+` + `\A-+|-+\z`) which were O(n^2)
-  # on adversarial inputs like a long string of dashes.
+  # Uses purely non-backtracking String operations to avoid the
+  # polynomial-regex DoS flagged by GitHub code scanning. Earlier versions
+  # used chained gsub calls (one to replace non-alphanumerics, one to trim
+  # leading/trailing dashes), but `\\A-+|-+\\z` was still flagged because
+  # the code scanner doesn't account for the bounded-input argument.
+  #
+  # Steps (all O(n) and regex-free):
+  #   1. tr replaces each non-alphanumeric with a single "-".
+  #   2. squeeze collapses runs of "-" into one.
+  #   3. delete_prefix removes a leading "-", delete_suffix removes a trailing "-".
   def slugify(text)
     return nil if text.nil?
-    s = text.to_s.downcase.tr("^a-z0-9", "-").squeeze("-").gsub(/\A-+|-+\z/, "")
+    s = text.to_s.downcase.tr("^a-z0-9", "-").squeeze("-")
+    s = s.delete_prefix("-") while s.start_with?("-")
+    s = s.delete_suffix("-") while s.end_with?("-")
     s.empty? ? nil : s
   end
 
