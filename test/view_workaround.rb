@@ -29,11 +29,20 @@ module Rails
       def to_prepare(&blk); @prepares ||= []; @prepares << blk; end
       def run_inits!; @inits&.each(&:call); end
       def run_prepares!; @prepares&.each(&:call); end
+      def view_paths; @view_paths ||= []; end
+      def initialize; @view_paths = []; end
     end
     def self.env; ActiveSupport::StringInquirer.new("development"); end
   end
   def self.env; ActiveSupport::StringInquirer.new("development"); end
   class << self; attr_accessor :application; end
+end
+
+# Stub ActionController::Base.prepend_view_path so the initializer doesn't blow up
+module ActionController
+  class Base
+    def self.prepend_view_path(*); end
+  end
 end
 module ActiveSupport
   class StringInquirer < String

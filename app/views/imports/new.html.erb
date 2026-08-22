@@ -1,0 +1,62 @@
+<%#
+  Override of Manyfold's app/views/imports/new.html.erb.
+
+  This file MUST be kept in sync with the upstream version. The only
+  intentional change is the addition of a "Printables" entry to the
+  Supported Sites list (always ✅, since the plugin requires no API key).
+
+  If Manyfold adds new integrations to its imports/new.html.erb, port
+  those additions here too.
+
+  Last synced with Manyfold v0.146.0 (commit b14858c88).
+%>
+<%= PageTitle title: t(".heading", site_name: site_name), heading: false %>
+
+<div class="container">
+  <h1><%= t(".heading", site_name: site_name) %></h1>
+  <% if @deserializer %>
+    <p><%= t(".import_type_html", url: @url, object_type: @deserializer.capabilities[:class].model_name.human) %></p>
+
+    <table class="table table-striped">
+      <% @deserializer.capabilities.except(:class).each_pair do |key, value| %>
+        <tr>
+          <td><%= @deserializer.capabilities[:class].human_attribute_name(key) %></td>
+          <td><%= value ? "✅" : "❌" %></td>
+        </tr>
+      <% end %>
+    </table>
+
+    <%= DoButton icon: "download", label: t(".import"), href: imports_path(url: @url), method: :post, variant: "primary" %>
+  <% else %>
+
+    <div class="row">
+      <div class="col">
+        <p class="lead"><%= t(".description") %></p>
+        <p><%= t(".import_capabilities") %></p>
+        <%= form_with url: new_import_path, method: :get, class: "mt-3" do |f| %>
+          <div class="input-group mb-3">
+            <%= f.url_field :url, class: "form-control", placeholder: translate(".placeholder"), aria_label: translate(".submit"), value: @url %>
+            <%= f.submit translate(".submit"), class: "btn btn-primary", name: nil %>
+          </div>
+        <% end %>
+      </div>
+      <div class="col col-auto">
+        <div class="card">
+          <div class="card-body">
+            <h5><%= t ".supported_sites" %></h5>
+            <ul class="list-unstyled">
+              <li><%= ((SiteSettings.cults3d_api_key.present? && SiteSettings.cults3d_api_username.present?) ? "✅" : "❌") %> <%= t "sites.cults3d" %></li>
+              <li><%= (SiteSettings.myminifactory_api_key.present? ? "✅" : "❌") %> <%= t "sites.myminifactory" %></li>
+              <li><%= (SiteSettings.thingiverse_api_key.present? ? "✅" : "❌") %> <%= t "sites.thingiverse" %></li>
+              <%# Printables is provided by the manyfold_printables plugin. %>
+              <%# Always shown as ✅ because no API key is required. %>
+              <li>✅ <%= t "sites.printables", default: "Printables" %></li>
+            </ul>
+            <%= link_to t(".integration_settings"), integrations_settings_path if policy(:settings).index? %>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  <% end %>
+</div>

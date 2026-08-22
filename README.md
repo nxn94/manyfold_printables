@@ -32,6 +32,10 @@ Printables' public GraphQL API.
   imported. The cover image becomes the model preview.
 - **Creator URLs** like `https://www.printables.com/@100prznt` are matched too:
   importing one creates a Creator record linked back to the Printables profile.
+- **Visible on `/imports/new`** — the plugin prepends a copy of Manyfold's
+  imports/new view (`app/views/imports/new.html.erb`) with a `✅ Printables`
+  entry added to the Supported Sites sidebar. No API key is required, so the
+  indicator is always ✅ when the plugin is loaded.
 - **No API key is required** — Printables' GraphQL endpoint is public.
 - File downloads go through the public `media.printables.com` CDN, so no
   authentication is needed for individual files either.

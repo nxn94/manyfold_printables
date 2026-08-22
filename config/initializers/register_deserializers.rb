@@ -87,6 +87,17 @@ Rails.application.config.to_prepare do
   else
     Rails.logger.warn "[manyfold_printables] to_prepare ran but Components::LinkList not defined; view workaround skipped"
   end
+
+  # Prepend our views directory so app/views/imports/new.html.erb (which
+  # adds a Printables entry to the Supported Sites list on /imports/new)
+  # is found before Manyfold's upstream version. See the comment at the
+  # top of that view file for sync requirements.
+  plugin_views_dir = File.expand_path("../../app/views", __dir__)
+  if Dir.exist?(plugin_views_dir)
+    Rails.application.config.view_paths.unshift(plugin_views_dir)
+    ActionController::Base.prepend_view_path(plugin_views_dir)
+    Rails.logger.info "[manyfold_printables] view path prepended: #{plugin_views_dir}"
+  end
 end
 
 # ---------------------------------------------------------------------------
