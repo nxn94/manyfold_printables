@@ -80,8 +80,10 @@ Rails.application.config.after_initialize do
   # If Manyfold later exposes PluginManager.register_deserializer or fixes
   # the Phlex interaction, this override can be dropped.
   Rails.application.config.to_prepare do
+    Rails.logger.info "[manyfold_printables] to_prepare running; Components::LinkList defined? = #{defined?(Components::LinkList)}"
     Components::LinkList.prepend(Module.new do
       def view_template
+        Rails.logger.info "[manyfold_printables] patched LinkList#view_template called for #{@links.size} links"
         return if @links.empty?
         ul class: "list-unstyled" do
           @links.each do |link|
@@ -111,6 +113,6 @@ Rails.application.config.after_initialize do
         end
       end
     end)
-    Rails.logger.info "[manyfold_printables] Components::LinkList prepended (view workaround active)"
+    Rails.logger.info "[manyfold_printables] Components::LinkList prepended (view workaround active); instance_methods includes view_template: #{Components::LinkList.instance_methods(false).include?(:view_template)}"
   end
 end
