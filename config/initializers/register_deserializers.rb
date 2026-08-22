@@ -73,41 +73,44 @@ Rails.application.config.after_initialize do
   # left untouched; users can resync by re-pasting the URL on the Imports
   # page.
   #
+  # We resolve the constant unconditionally so Zeitwerk autoloads
+  # Components::LinkList if it hasn't been touched yet. The prepend mutates
+  # the class in place, so subsequent renders pick up the patched version.
+  #
   # If Manyfold later exposes PluginManager.register_deserializer or fixes
   # the Phlex interaction, this override can be dropped.
   Rails.application.config.to_prepare do
-    if defined?(Components::LinkList)
-      Components::LinkList.prepend(Module.new do
-        def view_template
-          return if @links.empty?
-          ul class: "list-unstyled" do
-            @links.each do |link|
-              next unless link.valid?
-              li do
-                Icon(icon: "link-45deg", role: "presentation") if @icons
+    Components::LinkList.prepend(Module.new do
+      def view_template
+        return if @links.empty?
+        ul class: "list-unstyled" do
+          @links.each do |link|
+            next unless link.valid?
+            li do
+              Icon(icon: "link-45deg", role: "presentation") if @icons
+              whitespace
+              link_to(
+                sanitize(link.text) || t("sites.%{site}" % {site: link.site}, default: "%{site}" % {site: link.site}),
+                link.url,
+                rel: "noreferrer"
+              )
+              # Skip the broken `policy(link.linkable).sync?` call for
+              # Printables deserializer instances. The "sync" button is
+              # suppressed for those links; re-import on /imports/new to
+              # refresh.
+              next if link.deserializer.is_a?(Integrations::Printables::BaseDeserializer)
+              if link.deserializer.present? && policy(link.linkable).sync?
                 whitespace
-                link_to(
-                  sanitize(link.text) || t("sites.%{site}" % {site: link.site}, default: "%{site}" % {site: link.site}),
-                  link.url,
-                  rel: "noreferrer"
-                )
-                # Skip the broken `policy(link.linkable).sync?` call for
-                # Printables deserializer instances. The "sync" button is
-                # suppressed for those links; re-import on /imports/new to
-                # refresh.
-                next if link.deserializer.is_a?(Integrations::Printables::BaseDeserializer)
-                if link.deserializer.present? && policy(link.linkable).sync?
-                  whitespace
-                  link_to({action: "sync", id: link.linkable, link: link.id}, {method: :post}) do
-                    Icon(icon: "arrow-repeat", label: t("components.link_list.sync"))
-                  end
-                  Icon(icon: "exclamation-triangle-fill") if link.problems.exists?
+                link_to({action: "sync", id: link.linkable, link: link.id}, {method: :post}) do
+                  Icon(icon: "arrow-repeat", label: t("components.link_list.sync"))
                 end
+                Icon(icon: "exclamation-triangle-fill") if link.problems.exists?
               end
             end
           end
         end
-      end)
-    end
+      end
+    end)
+    Rails.logger.info "[manyfold_printables] Components::LinkList prepended (view workaround active)"
   end
 end
