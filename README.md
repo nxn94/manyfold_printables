@@ -141,6 +141,13 @@ ruby test/print_26497_regression.rb      # end-to-end check against a real
                                          # files under /previews/ being
                                          # filtered out, all STL URLs
                                          # actually 200 from the CDN.
+ruby test/view_workaround.rb             # asserts the Link#deserializer
+                                         # workaround keeps the per-link
+                                         # "resync" button out of the
+                                         # Manyfold/Phlex rendering bug
+                                         # (ArgumentError at link_list.rb:27)
+                                         # while still letting the actual
+                                         # sync job use our deserializer.
 ```
 
 ### Updating the schema-guard test when Manyfold adds columns
