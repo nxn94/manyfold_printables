@@ -1,0 +1,80 @@
+{
+  "data": {
+    "print": {
+      "id": "46705",
+      "name": "Battery Tray (16x AA, 16x AAA, 4x CR2032)",
+      "summary": "Simple tray to store some batteries.",
+      "description": "<p>The tray holds a total of 16 AA batteries, 16 AAA batteries and 4 CR2032 batteries.</p><h3>Print instructions</h3><p>The tray should be printed upside down to get a fine top side. Glue the bottom plate into the holder with some glue.</p>",
+      "nsfw": false,
+      "modified": "2022-03-30T12:07:30.394343+00:00",
+      "firstPublish": "2020-11-19T16:44:55.438030+00:00",
+      "datePublished": "2020-11-19T16:44:55.438030+00:00",
+      "downloadCount": 375,
+      "displayCount": 1402,
+      "filesCount": 4,
+      "likesCount": 45,
+      "makesCount": 4,
+      "commentCount": 11,
+      "ratingAvg": "5.0000000000",
+      "ratingCount": 8,
+      "thingiverseLink": null,
+      "publicCollectionsCount": 31,
+      "numPieces": 2,
+      "weight": "85.00",
+      "printDuration": "4.02",
+      "license": {
+        "id": "4",
+        "name": "Creative Commons \u2014 Attribution  \u2014 Noncommercial  \u2014  Share Alike",
+        "disallowRemixing": false
+      },
+      "image": {
+        "id": "222693",
+        "filePath": "media/prints/46705/images/465226_6ae5fc98-0136-4c70-ac43-02a96dd030c5/img_0099.jpg",
+        "rotation": 0
+      },
+      "images": [
+        {
+          "id": "222693",
+          "filePath": "media/prints/46705/images/465226_6ae5fc98-0136-4c70-ac43-02a96dd030c5/img_0099.jpg",
+          "rotation": 0
+        }
+      ],
+      "stls": [
+        {
+          "id": "191858",
+          "name": "batterytray_bottom.stl",
+          "fileSize": 13984,
+          "filePreviewPath": "media/prints/46705/stls/465216_a283bb90-b6d5-4bd4-a712-de726f9ecdef/batterytray_bottom_preview.png"
+        },
+        {
+          "id": "191859",
+          "name": "batterytray.stl",
+          "fileSize": 1144484,
+          "filePreviewPath": "media/prints/46705/stls/465215_718447d5-d9ae-42b5-aa12-cf6db0edb1eb/batterytray_preview.png"
+        }
+      ],
+      "slas": [],
+      "gcodes": [
+        {
+          "id": "19020",
+          "name": "batterytray_bottom_03mm_pla_mk3s_35m.gcode",
+          "fileSize": 110066,
+          "filePreviewPath": "media/prints/46705/gcodes/465217_a56fe6a1-ae11-4f41-8389-4ac37b687610/batterytray_bottom_03mm_pla_mk3s_35m_preview.png"
+        },
+        {
+          "id": "19021",
+          "name": "batterytray_03mm_pla_mk3s_3h26m.gcode",
+          "fileSize": 12700335,
+          "filePreviewPath": "media/prints/46705/gcodes/465218_42f1dce3-e04b-4c8a-aa57-4b18b228df54/batterytray_03mm_pla_mk3s_3h26m_preview.png"
+        }
+      ],
+      "user": {
+        "id": "23641",
+        "handle": "100prznt",
+        "publicUsername": "100prznt",
+        "verified": false
+      },
+      "tags": []
+    }
+  }
+}

@@ -5,7 +5,7 @@ Gem::Specification.new do |spec|
   spec.version = ManyfoldPrintables::VERSION
   spec.authors = ["nxn"]
   spec.email = ["nxn@localhost"]
-  spec.homepage = "https://github.com/nxn/manyfold_printables"
+  spec.homepage = "https://github.com/nxn94/manyfold_printables"
   spec.summary = "Import models and creators from Printables.com via their GraphQL API"
   spec.description = "Adds Printables.com as an external site source for Manyfold. " \
                      "Paste a printables.com/model/ URL on import or attach it to an " \

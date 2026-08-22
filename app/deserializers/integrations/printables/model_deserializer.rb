@@ -85,11 +85,16 @@ class Integrations::Printables::ModelDeserializer < Integrations::Printables::Ba
 
     file_entries = build_file_entries(data)
 
+    # Manyfold's Model has `notes` (long, markdown/HTML) and `excerpt` (short blurb)
+    # but no `summary` or `description`. Printables gives us both `summary` (one-line
+    # tagline) and `description` (full HTML) — we map summary → excerpt and
+    # description → notes, matching how the Cults3d integration treats its
+    # `description` field as `notes`.
     {
       name: data["name"],
       slug: data["slug"].to_s.empty? ? slugify(data["name"]) : data["slug"],
       notes: data["description"],
-      summary: data["summary"],
+      excerpt: data["summary"],
       sensitive: data["nsfw"] == true,
       tag_list: Array(data["tags"]).map { |t| t["name"] }.compact,
       license: data.dig("license", "name"),

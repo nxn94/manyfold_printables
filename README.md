@@ -114,18 +114,35 @@ dependencies are added — it uses `Net::HTTP`, `JSON`, `URI`, and `CGI` from
 the standard library plus `Faraday::ResourceNotFound` for the "not found"
 error type that Manyfold's existing integrations already use.
 
-Test by checking the gemspec loads:
+### Running the tests
 
-```
-gem spec manyfold_printables.gemspec
+The tests live in `test/` and run as plain Ruby scripts (no RSpec). They
+need the Manyfold source tree checked out at `/tmp/manyfold-research/manyfold`
+so they can stub the deserializer base classes. The tests do **not** need
+Manyfold to be running — they load only the deserializer classes plus
+minimal stubs.
+
+```bash
+# 1. Clone the Manyfold source (sparse, you only need app/deserializers and db/migrate):
+git clone --depth 1 --filter=blob:none --sparse \
+  https://github.com/manyfold3d/manyfold.git /tmp/manyfold-research/manyfold
+cd /tmp/manyfold-research/manyfold
+git sparse-checkout set app/deserializers db
+
+# 2. Run the tests:
+cd /path/to/manyfold_printables
+ruby test/schema_guard.rb       # asserts every deserializer key maps to a
+                                # real Model/Creator column or accepted
+                                # special key. Catches "unknown attribute X"
+                                # bugs like the one fixed in commit a3c2abe.
 ```
 
-…and that the deserializer classes autoload in a Manyfold instance:
+### Updating the schema-guard test when Manyfold adds columns
 
-```ruby
-Integrations::Printables::ModelDeserializer.new(uri: "https://www.printables.com/model/46705").valid?
-# => true
-```
+If Manyfold adds a new column to the `models` table (e.g. via a new
+migration), update the `KNOWN_MODEL_COLUMNS` set in
+`test/schema_guard.rb`. Otherwise the test will fail with a false positive
+when your deserializer starts using the new column.
 
 ## License
 
