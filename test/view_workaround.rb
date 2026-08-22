@@ -67,9 +67,16 @@ end
 class Link
   def self.deserializer_for(url:, for_class: nil)
     return nil if url.nil? || url.empty?
-    if url.include?("thingiverse.com")
+    # Use URI(host) matching instead of substring matching — both for
+    # correctness (avoids spurious matches on path/query components) and to
+    # silence GitHub code-scanning's `incomplete-url-substring-sanitization`
+    # warning. Test stub, but cleaner code is better.
+    require "uri" rescue nil
+    host = URI.parse(url).host rescue nil
+    case host
+    when "thingiverse.com", "www.thingiverse.com"
       Integrations::Thingiverse::ModelDeserializer.new(uri: url)
-    elsif url.include?("cults3d.com")
+    when "cults3d.com", "www.cults3d.com"
       Integrations::Cults3d::ModelDeserializer.new(uri: url)
     end
   end

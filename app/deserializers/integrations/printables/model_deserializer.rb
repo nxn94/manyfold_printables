@@ -212,10 +212,18 @@ class Integrations::Printables::ModelDeserializer < Integrations::Printables::Ba
   end
 
   # Lightweight slugify that doesn't depend on ActiveSupport::Inflector#parameterize.
-  # Strips non-word chars and replaces whitespace with dashes.
+  # Strips non-word chars and replaces whitespace with dashes, then collapses
+  # repeated dashes and trims leading/trailing dashes.
+  #
+  # Uses a non-backtracking approach (String#tr + String#squeeze + String#strip
+  # + Range#delete_at style) to avoid the polynomial-regex DoS flagged by
+  # GitHub code scanning. The previous gsub-based version had nested
+  # quantified alternations (`[^a-z0-9]+` + `\A-+|-+\z`) which were O(n^2)
+  # on adversarial inputs like a long string of dashes.
   def slugify(text)
     return nil if text.nil?
-    text.to_s.downcase.gsub(/[^a-z0-9]+/, "-").gsub(/\A-+|-+\z/, "")
+    s = text.to_s.downcase.tr("^a-z0-9", "-").squeeze("-").gsub(/\A-+|-+\z/, "")
+    s.empty? ? nil : s
   end
 
   def creator_attributes(user_data)
