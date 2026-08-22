@@ -91,6 +91,11 @@ class Integrations::Printables::ModelDeserializer < Integrations::Printables::Ba
     # `description` (full HTML) — we map summary → caption and description →
     # notes, matching how the Cults3d integration treats its `description`
     # field as `notes`.
+    #
+    # Manyfold validates license against the SPDX list, so we map Printables'
+    # numeric license IDs to SPDX identifiers. Unknown IDs map to nil so the
+    # model's normalize_license callback will clear the column rather than
+    # raise a validation error.
     {
       name: data["name"],
       slug: data["slug"].to_s.empty? ? slugify(data["name"]) : data["slug"],
@@ -98,7 +103,7 @@ class Integrations::Printables::ModelDeserializer < Integrations::Printables::Ba
       caption: data["summary"],
       sensitive: data["nsfw"] == true,
       tag_list: Array(data["tags"]).map { |t| t["name"] }.compact,
-      license: data.dig("license", "name"),
+      license: spdx_license_for(data.dig("license", "id")),
       file_urls: file_entries,
       preview_filename: preview_filename_from(data)
     }.merge(creator_attributes(data["user"]))
@@ -153,12 +158,19 @@ class Integrations::Printables::ModelDeserializer < Integrations::Printables::Ba
   end
 
   # The GraphQL response gives us filePreviewPath (a path on media.printables.com)
-  # but not the absolute download URL for the real file. The CDN layout is
+  # but not the absolute download URL for the real file. The CDN layout for a
+  # true `.stl` / `.sla` / `.gcode` is:
   #   media/prints/<id>/<kind>/<uuid>/<basename>_preview.<preview-ext>
   # and the real file is at the same path with `_preview.<ext>` replaced by the
-  # actual filename. We derive the URL here; the preview is HTTP-public.
+  # actual filename.
+  #
+  # However, Printables' `stls` array can contain entries whose preview path is
+  # under `/previews/` (general file previews, used for STEP, 3MF, OBJ, etc. —
+  # formats Printables doesn't serve under `/stls/`). For those we can't derive
+  # a working download URL, so we return nil and the entry is skipped.
   def derived_file_url(file_preview_path, real_filename)
     return nil if file_preview_path.to_s.empty? || real_filename.to_s.empty?
+    return nil unless KNOWN_PREVIEW_DIRS.any? { |dir| file_preview_path.include?(dir) }
     dir = file_preview_path.sub(%r{/[^/]+\z}, "")
     extension = File.extname(real_filename)
     base = File.basename(real_filename, extension)

@@ -3,6 +3,33 @@ module Integrations::Printables
     GRAPHQL_ENDPOINT = "https://api.printables.com/graphql/".freeze
     CDN_HOST = "media.printables.com".freeze
 
+    # Map Printables' numeric license IDs to SPDX identifiers. Printables'
+    # GraphQL `license.id` is a numeric database ID (1, 2, 4, 7, ...), and the
+    # `license.name` is a human-readable title like "Creative Commons —
+    # Attribution". Manyfold validates `Model.license` against the SPDX list,
+    # so we translate IDs to SPDX identifiers. Unknown IDs map to nil so the
+    # model's `normalize_license` callback clears the column rather than
+    # raising a validation error and rolling back the sync.
+    PRINTABLES_LICENSE_TO_SPDX = {
+      "1" => "CC-BY-4.0",         # Creative Commons — Attribution
+      "2" => "CC-BY-SA-4.0",      # Creative Commons — Attribution — Share Alike
+      "3" => "CC-BY-NC-4.0",      # Creative Commons — Attribution — Noncommercial
+      "4" => "CC-BY-NC-SA-4.0",   # Creative Commons — Attribution — Noncommercial — Share Alike
+      "5" => nil,                 # (reserved; not seen)
+      "6" => "CC-BY-NC-ND-4.0",   # Creative Commons — Attribution — Noncommercial — NoDerivatives
+      "7" => "CC0-1.0",           # Creative Commons — Public Domain
+      "8" => nil,                 # (reserved)
+      "9" => nil                  # (Printables-internal / non-SPDX, treat as unknown)
+    }.freeze
+
+    # File kinds Printables' GraphQL exposes under the `stls` array. The `stls`
+    # array is not strictly `.stl` only — it can include `.stp` (STEP), `.3mf`,
+    # `.obj`, etc. We accept the entry based on its preview-path directory, not
+    # its declared kind, because the directory reflects what the CDN actually
+    # serves. Anything not under one of these directories is skipped (its
+    # download URL can't be derived).
+    KNOWN_PREVIEW_DIRS = %w[/stls/ /slas/ /gcodes/].freeze
+
     # Path patterns for the two kinds of URLs we accept:
     #   https://www.printables.com/model/46705
     #   https://www.printables.com/model/46705-battery-tray-16x-aa-16x-aaa-4x-cr2032
@@ -77,6 +104,13 @@ module Integrations::Printables
 
     def blank?(s)
       s.nil? || s.to_s.empty?
+    end
+
+    # Printables license ID -> SPDX identifier. Unknown IDs return nil so the
+    # Model's normalize_license callback clears the column rather than raising.
+    def spdx_license_for(printables_license_id)
+      return nil if printables_license_id.nil?
+      PRINTABLES_LICENSE_TO_SPDX[printables_license_id.to_s]
     end
   end
 end

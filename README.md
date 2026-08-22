@@ -131,10 +131,16 @@ git sparse-checkout set app/deserializers db
 
 # 2. Run the tests:
 cd /path/to/manyfold_printables
-ruby test/schema_guard.rb       # asserts every deserializer key maps to a
-                                # real Model/Creator column or accepted
-                                # special key. Catches "unknown attribute X"
-                                # bugs like the one fixed in commit a3c2abe.
+ruby test/schema_guard.rb                # asserts every deserializer key
+                                         # maps to a real Model/Creator
+                                         # column or accepted special key.
+ruby test/print_26497_regression.rb      # end-to-end check against a real
+                                         # captured Printables response that
+                                         # previously failed in production:
+                                         # SPDX license mapping, .stp/3mf
+                                         # files under /previews/ being
+                                         # filtered out, all STL URLs
+                                         # actually 200 from the CDN.
 ```
 
 ### Updating the schema-guard test when Manyfold adds columns
