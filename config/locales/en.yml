@@ -1,0 +1,6 @@
+---
+en:
+  integrations:
+    printables:
+      name: Printables.com
+      description: Import models and creators from printables.com via their public GraphQL API.
