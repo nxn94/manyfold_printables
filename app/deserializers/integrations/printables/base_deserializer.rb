@@ -3,6 +3,12 @@ module Integrations::Printables
     GRAPHQL_ENDPOINT = "https://api.printables.com/graphql/".freeze
     CDN_HOST = "media.printables.com".freeze
 
+    require "net/http"
+    require "uri"
+    require "json"
+    require "cgi"
+    require "tempfile"
+
     # Map Printables' numeric license IDs to SPDX identifiers. Printables'
     # GraphQL `license.id` is a numeric database ID (1, 2, 4, 7, ...), and the
     # `license.name` is a human-readable title like "Creative Commons —

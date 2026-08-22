@@ -143,14 +143,20 @@ class Integrations::Printables::ModelDeserializer < Integrations::Printables::Ba
         next unless !f["name"].to_s.empty? && !f["filePreviewPath"].to_s.empty?
         url = derived_file_url(f["filePreviewPath"], f["name"])
         next unless url
-        # The CDN only publicly serves files whose preview path translates
-        # to a working download URL. Many newer prints use a UUID-based
-        # CDN layout (`media/prints/<uuid>/previews/<uuid>.png`) where the
-        # actual file is NOT publicly downloadable — the website only
-        # serves it through an authenticated download flow. HEAD-check
-        # each candidate URL synchronously and skip 404s with a clear
-        # log line so the user knows why files were skipped.
-        unless url_exists?(url)
+
+        # Step 1: HEAD-check the URL anonymously. If 2xx/3xx, the file is
+        # publicly downloadable — emit it as-is and let Manyfold's
+        # create_or_update_file_from_url fetch it via Shrine.
+        if url_exists?(url)
+          entries << {url: url, filename: "files/#{f['name']}"}
+          next
+        end
+
+        # Step 2: HEAD returned 404. If a session cookie is configured,
+        # the file is likely behind Printables' authenticated download flow.
+        # Emit the URL anyway — our ModelFile#update_from_url! patch
+        # detects printables URLs and fetches them with the cookie.
+        if ENV["PRINTABLES_SESSION_COOKIE"].to_s.empty?
           Rails.logger.info(
             "[manyfold_printables] skipping #{f['name']}: " \
             "CDN URL returned 404 — file is not publicly downloadable from printables.com " \
@@ -158,6 +164,7 @@ class Integrations::Printables::ModelDeserializer < Integrations::Printables::Ba
           )
           next
         end
+
         entries << {url: url, filename: "files/#{f['name']}"}
       end
     end

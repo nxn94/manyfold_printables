@@ -124,4 +124,54 @@ Rails.application.config.after_initialize do
     end
   end)
   Rails.logger.info "[manyfold_printables] Link#deserializer_for prepended with #{printables_deserializer_classes.size} classes"
+
+  # ---------------------------------------------------------------------------
+  # Authenticated download support for newer prints.
+  #
+  # Many newer prints (since ~2024) live behind Printables' authenticated
+  # download flow: the public CDN returns 404 for the derived URLs. If the
+  # user has set PRINTABLES_SESSION_COOKIE, we want to fetch those files
+  # with the cookie included.
+  #
+  # The patch targets ModelFile#update_from_url! (the Manyfold method that
+  # calls Shrine's assign_remote_url). It detects URLs on printables' CDN
+  # host and substitutes a custom downloader that includes the session
+  # cookie. Other URLs are passed through unchanged.
+  #
+  # Only applies when PRINTABLES_SESSION_COOKIE is set. If unset, the
+  # patch is a no-op (downloads behave exactly as before).
+  if defined?(::ModelFile) && !ENV["PRINTABLES_SESSION_COOKIE"].to_s.empty?
+    ::ModelFile.prepend(Module.new do
+      def update_from_url!(url:)
+        return super unless url.to_s.include?("media.printables.com")
+        cookie = ENV["PRINTABLES_SESSION_COOKIE"]
+        # Custom downloader callable. Shrine invokes it as
+        # downloader.call(url, **options). We fetch with Net::HTTP and the
+        # session cookie, then return a StringIO that Shrine can ingest via
+        # attach_cached. If the response is non-2xx, raise a Down-like error
+        # so Shrine marks the download as failed.
+        downloader_with_cookie = ->(u, **_opts) {
+          uri = URI.parse(u)
+          http = Net::HTTP.new(uri.host, uri.port)
+          http.use_ssl = (uri.scheme == "https")
+          http.open_timeout = 10
+          http.read_timeout = 60
+          req = Net::HTTP::Get.new(uri.request_uri)
+          req["Cookie"] = cookie
+          req["User-Agent"] = "Manyfold/#{ManyfoldPrintables::VERSION} (+manyfold_printables plugin)"
+          resp = http.request(req)
+          unless resp.code.to_i.between?(200, 299)
+            raise Shrine::Plugins::RemoteUrl::DownloadError,
+                  "HTTP #{resp.code} — cookie may be expired or print is private"
+          end
+          StringIO.new(resp.body)
+        }
+        save! if attachment_attacher.assign_remote_url(
+          url,
+          downloader: downloader_with_cookie
+        )
+      end
+    end)
+    Rails.logger.info "[manyfold_printables] ModelFile#update_from_url! prepended (authenticated downloads enabled)"
+  end
 end
