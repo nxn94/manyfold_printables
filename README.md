@@ -85,27 +85,36 @@ extend Manyfold's core from a plugin today. If/when Manyfold adds a
 `PluginManager.register_deserializer` API, this initializer can be replaced
 with that registration.
 
-## Caveats
+### Caveats
 
-- **Printables' GraphQL schema is undocumented and unstable.** Some fields the
-  third-party `PrintablesGraphQL` reference (https://github.com/100prznt/PrintablesGraphQL)
-  documents (`user.slug`, `user.printsCount`, `shareCount`, …) have already
-  been removed. The plugin uses only fields that have been verified against
-  the live schema. If a field is renamed, update `PRINT_QUERY` /
-  `USER_QUERY` accordingly and release a new version.
-- **Creator URL → numeric ID** requires one HTML fetch to resolve the
-  `@handle` to the internal user id (Printables doesn't expose a
-  handle-based GraphQL lookup). If that page returns a Cloudflare challenge
-  from your server's IP, the creator import will fail and report an
-  `http_error` problem on the link.
-- **Files are pulled from `media.printables.com`.** That CDN serves files
-  unmodified under the same path as the preview (with the `_preview` suffix
-  stripped). If Printables changes that CDN layout, file downloads will break
-  but metadata will still sync.
-- **No file types beyond STL / SLA / gcode.** Printables doesn't expose
-  generic "files" via GraphQL; if a model is offered as, say, a 3MF, you
-  won't get it automatically. The same limitation applies to the
-  third-party PrintablesGraphQL reference.
+1. **Printables' GraphQL schema is undocumented and unstable.** Some fields the
+   third-party `PrintablesGraphQL` reference (https://github.com/100prznt/PrintablesGraphQL)
+   documents (`user.slug`, `user.printsCount`, `shareCount`, …) have already
+   been removed. The plugin uses only fields that have been verified against
+   the live schema. If a field is renamed, update `PRINT_QUERY` /
+   `USER_QUERY` accordingly and release a new version.
+2. **Not all printable file formats can be downloaded from Printables' CDN.**
+   Printables' public CDN (`media.printables.com`) only serves files for
+   `.stl`, `.sla`, and `.gcode` under their kind-specific directories
+   (`/stls/`, `/slas/`, `/gcodes/`). Other formats (`.3mf`, `.stp`, `.obj`, …)
+   have their preview path under `/previews/` and the actual file is only
+   available through Printables' authenticated web download flow.
+   The plugin HEAD-checks each candidate URL and silently skips 404s with
+   a log line like `[manyfold_printables] skipping thing.3mf: ... file is
+   not publicly downloadable from printables.com`. For prints whose only
+   printable file is a 3MF (or similar non-STL format), you'll need to
+   download the file manually from printables.com and upload it to
+   Manyfold — metadata, tags, images, license, and creator will still be
+   imported correctly.
+3. **Creator URL → numeric ID** requires one HTML fetch to resolve the
+   `@handle` to the internal user id (Printables doesn't expose a
+   handle-based GraphQL lookup). If that page returns a Cloudflare challenge
+   from your server's IP, the creator import will fail and report an
+   `http_error` problem on the link.
+4. **Files are pulled from `media.printables.com`.** That CDN serves files
+   unmodified under the same path as the preview (with the `_preview` suffix
+   stripped). If Printables changes that CDN layout, file downloads will break
+   but metadata will still sync.
 
 ## Development
 

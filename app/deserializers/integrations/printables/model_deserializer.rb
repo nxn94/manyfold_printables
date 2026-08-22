@@ -142,7 +142,22 @@ class Integrations::Printables::ModelDeserializer < Integrations::Printables::Ba
       Array(data[kind]).each do |f|
         next unless !f["name"].to_s.empty? && !f["filePreviewPath"].to_s.empty?
         url = derived_file_url(f["filePreviewPath"], f["name"])
-        entries << {url: url, filename: "files/#{f['name']}"} if url
+        next unless url
+        # The CDN only publicly serves files whose preview path is under a
+        # kind-specific directory (e.g. /stls/, /slas/, /gcodes/). When the
+        # preview path is under /previews/ (general previews), the CDN only
+        # has the preview PNG, not the real file — so derived URLs return 404
+        # silently in Manyfold and produce broken ModelFile rows. To avoid
+        # that, HEAD-check each candidate URL synchronously and skip 404s.
+        unless url_exists?(url)
+          Rails.logger.info(
+            "[manyfold_printables] skipping #{f['name']}: " \
+            "preview path #{f['filePreviewPath']} is not under a kind-specific " \
+            "CDN directory (file is not publicly downloadable from printables.com)"
+          )
+          next
+        end
+        entries << {url: url, filename: "files/#{f['name']}"}
       end
     end
 
@@ -162,12 +177,9 @@ class Integrations::Printables::ModelDeserializer < Integrations::Printables::Ba
   # true `.stl` / `.sla` / `.gcode` is:
   #   media/prints/<id>/<kind>/<uuid>/<basename>_preview.<preview-ext>
   # and the real file is at the same path with `_preview.<ext>` replaced by the
-  # actual filename.
-  #
-  # However, Printables' `stls` array can contain entries whose preview path is
-  # under `/previews/` (general file previews, used for STEP, 3MF, OBJ, etc. —
-  # formats Printables doesn't serve under `/stls/`). For those we can't derive
-  # a working download URL, so we return nil and the entry is skipped.
+  # actual filename. For `.stp` / `.3mf` / `.obj` (and other 3D formats) the
+  # preview path is sometimes under `/stls/`, sometimes under `/previews/`;
+  # only the `/stls/`, `/slas/`, `/gcodes/` variants are actually downloadable.
   def derived_file_url(file_preview_path, real_filename)
     return nil if file_preview_path.to_s.empty? || real_filename.to_s.empty?
     return nil unless KNOWN_PREVIEW_DIRS.any? { |dir| file_preview_path.include?(dir) }
@@ -175,6 +187,21 @@ class Integrations::Printables::ModelDeserializer < Integrations::Printables::Ba
     extension = File.extname(real_filename)
     base = File.basename(real_filename, extension)
     file_url("#{dir}/#{base}#{extension}")
+  end
+
+  # HEAD-check a candidate CDN URL. Returns true for HTTP 2xx/3xx, false for
+  # 4xx/5xx or any network error. Cheap synchronous check; only runs during
+  # initial sync (one HEAD per file).
+  def url_exists?(url)
+    uri = URI.parse(url)
+    http = Net::HTTP.new(uri.host, uri.port)
+    http.use_ssl = (uri.scheme == "https")
+    http.open_timeout = 5
+    http.read_timeout = 5
+    response = http.head(uri.request_uri)
+    response.code.to_i.between?(200, 399)
+  rescue StandardError
+    false
   end
 
   def preview_filename_from(data)
