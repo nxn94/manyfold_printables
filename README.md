@@ -9,6 +9,20 @@ an existing model via a **Link**) and Manyfold will fetch the metadata, cover
 image, and downloadable 3D files (STL / SLA / gcode) directly from
 Printables' public GraphQL API.
 
+> **⚠️ File format limitation**
+>
+> Printables' public CDN (`media.printables.com`) only serves files for
+> **`.stl`**, **`.sla`**, and **`.gcode`**. For prints that offer only
+> other formats (`.3mf`, `.stp`, `.obj`, …) the metadata, tags, license,
+> images, and creator are still imported correctly, **but the actual
+> 3D file is not**. For those prints you'll need to download the file
+> manually from printables.com in your browser and upload it to Manyfold.
+>
+> Why: Printables serves `.3mf` / `.stp` / `.obj` files only through their
+> authenticated web download flow — there is no public CDN URL we can
+> derive from the GraphQL response. This is a Printables platform
+> limitation, not a plugin limitation.
+
 ## What it does
 
 - **Model URLs** like `https://www.printables.com/model/46705` or
