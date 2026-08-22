@@ -41,11 +41,19 @@ require "#{PLUGIN}/base_deserializer.rb"
 require "#{PLUGIN}/model_deserializer.rb"
 require "#{PLUGIN}/creator_deserializer.rb"
 
-# Authoritative Model columns (from db/migrate/* in the manyfold repo).
+# Authoritative Model columns (from db/migrate/* in the manyfold repo at
+# v0.146.0+, the minimum version this plugin supports).
+#
+# History:
+#   - 20230202210000 added `notes` and `excerpt`
+#   - 20230222155910 renamed `excerpt` to `caption` on models/creators/model_files
+#   - 20241017093301 added `sensitive` to models and comments
+# So `caption` is the right column, not `excerpt` or `summary`.
+#
 # Keep this in sync when Manyfold adds migrations.
 KNOWN_MODEL_COLUMNS = %w[
   id name path library_id creator_id created_at updated_at preview_file_id
-  entrypoint_id entrypoint_fragment notes excerpt license slug like_count
+  entrypoint_id entrypoint_fragment notes caption license slug like_count
   collection_id sensitive
 ].to_set
 
