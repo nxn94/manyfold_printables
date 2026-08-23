@@ -59,7 +59,7 @@ data = JSON.parse(File.read(fixture_path))["data"]["print"]
 
 # Stub graphql (used for the print query) — return captured fixture data
 Integrations::Printables::BaseDeserializer.class_eval do
-  define_method(:graphql) { |_q, _v = {}| {"print" => data, "getDownloadLink" => nil} }
+  define_method(:graphql) { |_q, _v = {}, **_opts| {"print" => data, "getDownloadLink" => nil} }
 end
 
 # Stub getDownloadLink results — based on what the live API returned for

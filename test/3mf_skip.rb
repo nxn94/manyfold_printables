@@ -66,7 +66,7 @@ data = {
 }
 
 Integrations::Printables::BaseDeserializer.class_eval do
-  define_method(:graphql) { |_q, _v = {}| {"print" => data} }
+  define_method(:graphql) { |_q, _v = {}, **_opts| {"print" => data} }
 end
 
 # Stub get_download_url to fail for file_id=2 only
@@ -94,7 +94,9 @@ failures << "expected entries for thing_a.stl and thing_c.stl, got #{stl_entries
 img_entries = result[:file_urls].select { |e| e[:filename].start_with?("images/") }
 failures << "expected 1 image entry, got #{img_entries.size}" unless img_entries.size == 1
 
-# Skip message logged for the failed file.
+# Skip message logged for the failed file. log_skip prints "[manyfold_printables] <msg>"
+# but we strip the prefix before substring matching so the test stays decoupled
+# from the exact prefix.
 log = Rails.logger.messages
 skip_logs = log.select { |m| m.include?("skipping") && m.include?("thing_b.stl") }
 failures << "expected skip log for thing_b.stl, got: #{log.inspect}" unless skip_logs.size == 1

@@ -68,7 +68,7 @@ unless File.exist?(captured_path)
 end
 fake_data = JSON.parse(File.read(captured_path))["data"]["print"]
 Integrations::Printables::BaseDeserializer.class_eval do
-  define_method(:graphql) { |_q, _v = {}| {"print" => fake_data} }
+  define_method(:graphql) { |_q, _v = {}, **_opts| {"print" => fake_data} }
 end
 
 # Stub get_download_url so the schema guard test doesn't make real

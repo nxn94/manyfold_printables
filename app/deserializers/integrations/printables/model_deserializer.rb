@@ -86,7 +86,7 @@ class Integrations::Printables::ModelDeserializer < Integrations::Printables::Ba
 
   def deserialize
     return {} unless valid?
-    data = graphql(PRINT_QUERY, {id: @model_id}).dig("print")
+    data = graphql(PRINT_QUERY, {id: @model_id}, operation_name: "ManyfoldPrintables").dig("print")
     raise Faraday::ResourceNotFound.new("Not Found") unless data
 
     file_entries = build_file_entries(data)
@@ -171,10 +171,7 @@ class Integrations::Printables::ModelDeserializer < Integrations::Printables::Ba
         if url
           entries << {url: url, filename: "files/#{f['name']}"}
         else
-          Rails.logger.info(
-            "[manyfold_printables] skipping #{f['name']}: " \
-            "getDownloadLink returned no URL for file id=#{f['id']} type=#{file_type}"
-          )
+          log_skip("skipping #{f['name']}: getDownloadLink returned no URL for file id=#{f['id']} type=#{file_type}")
         end
       end
     end
@@ -214,12 +211,22 @@ class Integrations::Printables::ModelDeserializer < Integrations::Printables::Ba
       fileType: file_type,
       source: "model_detail"
     }
-    data = graphql(query, variables).dig("data", "getDownloadLink") || {}
+    data = graphql(query, variables, operation_name: "GetDownloadLink").dig("getDownloadLink") || {}
     return nil unless data["ok"]
     data.dig("output", "link")
   rescue StandardError => e
-    Rails.logger.warn("[manyfold_printables] get_download_url(#{file_id}) failed: #{e.class}: #{e.message}")
+    log_skip("get_download_url(#{file_id}) failed: #{e.class}: #{e.message}")
     nil
+  end
+
+  # Plugin logger helper. Falls back to stderr when Rails.logger isn't
+  # available (e.g. in unit tests that don't load the full Rails stack).
+  def log_skip(message)
+    if defined?(Rails) && Rails.respond_to?(:logger) && Rails.logger
+      Rails.logger.info("[manyfold_printables] #{message}")
+    else
+      warn("[manyfold_printables] #{message}")
+    end
   end
 
   # (obsolete — was used to derive a CDN URL from the preview path; we now

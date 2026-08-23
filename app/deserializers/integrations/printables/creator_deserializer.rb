@@ -23,7 +23,7 @@ class Integrations::Printables::CreatorDeserializer < Integrations::Printables::
     return {} unless valid?
     user_id = resolve_user_id(@handle)
     raise Faraday::ResourceNotFound.new("Not Found") unless user_id
-    data = graphql(USER_QUERY, {id: user_id}).dig("user")
+    data = graphql(USER_QUERY, {id: user_id}, operation_name: "ManyfoldPrintables").dig("user")
     raise Faraday::ResourceNotFound.new("Not Found") unless data
     self.class.parse(data)
   end

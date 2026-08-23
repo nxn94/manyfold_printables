@@ -58,7 +58,14 @@ module Integrations::Printables
     # POST a GraphQL operation to the Printables endpoint and return the parsed body.
     # Raises Faraday::ResourceNotFound for "not found" so the calling Job can record
     # a problem on the Link, just like the other integrations do.
-    def graphql(query, variables = {})
+    #
+    # The Printables API validates operationName against the document — sending
+    # an operationName that doesn't match the query/mutation causes
+    # "Unknown operation named 'X'" errors. So callers must pass the correct
+    # operationName. For multi-operation documents (e.g. `query Foo { ... }
+    # mutation Bar { ... }`), pass the specific operation name; for single-op
+    # docs, omit operationName (GraphQL will execute the only one present).
+    def graphql(query, variables = {}, operation_name: nil)
       uri = URI.parse(GRAPHQL_ENDPOINT)
       http = Net::HTTP.new(uri.host, uri.port)
       http.use_ssl = true
@@ -70,11 +77,12 @@ module Integrations::Printables
         "Accept" => "application/json",
         "User-Agent" => "Manyfold/#{ManyfoldPrintables::VERSION} (+manyfold_printables plugin)"
       })
-      req.body = JSON.generate(
-        operationName: "ManyfoldPrintables",
+      payload = {
         query: query,
         variables: variables
-      )
+      }
+      payload[:operationName] = operation_name if operation_name
+      req.body = JSON.generate(payload)
 
       response = http.request(req)
       raise Faraday::ResourceNotFound.new("Not Found") if response.code.to_i == 404

@@ -74,7 +74,7 @@ data = {
 }
 
 Integrations::Printables::BaseDeserializer.class_eval do
-  define_method(:graphql) { |_q, _v = {}| {"print" => data} }
+  define_method(:graphql) { |_q, _v = {}, **_opts| {"print" => data} }
 end
 
 # Stub get_download_url to return a working signed URL for every file.
