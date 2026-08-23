@@ -29,6 +29,16 @@ module Integrations
 end
 class Model; end; class Creator; end
 require "net/http"; require "json"; require "uri"; require "cgi"
+
+# Returns the host of a URL string, or nil if it's missing/malformed/relative.
+# Used by tests to assert URL provenance by host (defuses
+# rb/incomplete-url-substring-sanitization in Code Scanning).
+def host_of(url)
+  return nil if url.nil? || url.to_s.empty?
+  URI.parse(url.to_s).host
+rescue URI::InvalidURIError
+  nil
+end
 module Faraday
   class ResourceNotFound < StandardError; def initialize(m = "Not Found"); super(m); end; end
   class Error < StandardError; end
@@ -93,11 +103,14 @@ stl_entries = result[:file_urls].select { |e| e[:filename].start_with?("files/")
 failures << "expected 6 file entries (3 STL + 3 STP), got #{stl_entries.size}" unless stl_entries.size == 6
 
 # Every file URL must point at files.printables.com (the signed-URL host)
-files_urls = result[:file_urls].select { |e| e[:url].to_s.start_with?("https://files.printables.com") }
+# Compare via URI host, not substring (defuses rb/incomplete-url-substring-sanitization
+# in Code Scanning: a string-prefix check would let e.g. "https://files.printables.com.attacker.tld/x"
+# through, even though such URLs could never come from our own deserializer).
+files_urls = result[:file_urls].select { |e| host_of(e[:url]) == "files.printables.com" }
 failures << "no files.printables.com URLs in result" if files_urls.empty?
 
 # images are still served from media.printables.com (image CDN hasn't moved)
-img_urls = result[:file_urls].select { |e| e[:url].to_s.start_with?("https://media.printables.com") }
+img_urls = result[:file_urls].select { |e| host_of(e[:url]) == "media.printables.com" }
 failures << "no image URLs in result" if img_urls.empty?
 
 # Sanity: name, slug, license, caption populated

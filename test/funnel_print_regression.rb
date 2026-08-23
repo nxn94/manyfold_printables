@@ -18,6 +18,16 @@ module Integrations
 end
 class Model; end; class Creator; end
 require "net/http"; require "json"; require "uri"; require "cgi"
+
+# Returns the host of a URL string, or nil if it's missing/malformed/relative.
+# Used by tests to assert URL provenance by host (defuses
+# rb/incomplete-url-substring-sanitization in Code Scanning).
+def host_of(url)
+  return nil if url.nil? || url.to_s.empty?
+  URI.parse(url.to_s).host
+rescue URI::InvalidURIError
+  nil
+end
 module Faraday
   class ResourceNotFound < StandardError; def initialize(m = "Not Found"); super(m); end; end
   class Error < StandardError; end
@@ -100,8 +110,12 @@ failures << "expected 7 file entries, got #{file_count}" unless file_count == 7
 img_count = result[:file_urls].count { |e| e[:filename].start_with?("images/") }
 failures << "expected 1 image entry, got #{img_count}" unless img_count == 1
 
-# All file URLs must be on files.printables.com (signed CDN URL host)
-files_urls = result[:file_urls].select { |e| e[:url].to_s.start_with?("https://files.printables.com") }
+# All file URLs must be on files.printables.com (signed CDN URL host).
+# Compare via URI host (not substring) to defuse
+# rb/incomplete-url-substring-sanitization: a prefix check would let
+# "https://files.printables.com.attacker.tld/x" through, even though such URLs
+# could never come from our deserializer.
+files_urls = result[:file_urls].select { |e| host_of(e[:url]) == "files.printables.com" }
 failures << "no files.printables.com URLs in result, got #{result[:file_urls].map { |e| e[:url][0,40] }}" if files_urls.empty?
 
 # No skip messages — getDownloadLink returns ok=true for everything.
