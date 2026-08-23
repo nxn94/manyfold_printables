@@ -6,37 +6,20 @@ same way the built-in Thingiverse and Cults3D integrations work.
 
 Paste a Printables model or creator URL on the **Import** page (or attach it to
 an existing model via a **Link**) and Manyfold will fetch the metadata, cover
-image, and downloadable 3D files (STL / SLA / gcode) directly from
-Printables' public GraphQL API.
+image, and **downloadable 3D files** — including `.stl`, `.3mf`, `.stp`, `.obj`,
+and `.gcode` — directly from Printables' public GraphQL API.
 
-> **⚠️ Printables availability limitation**
+> **How it works**
 >
-> Most Printables prints download fine via the public `getDownloadLink`
-> GraphQL mutation (which the printables.com website uses internally for
-> its "Download all" button). The plugin uses this mutation to get a
-> 24-hour signed CDN URL per file, then Manyfold downloads the file.
-> This works without authentication for `.stl`, `.3mf`, `.stp`, `.obj`,
-> `.gcode`, and other formats — for every print we tested, both old
-> (pre-2024) and new (post-2024).
+> The plugin uses Printables' public `getDownloadLink` GraphQL mutation
+> (the same endpoint the printables.com website uses for its "Download all"
+> button). For each file, the mutation returns a 24-hour signed CDN URL on
+> `files.printables.com`. Manyfold downloads the file from that URL.
 >
-> Some files may still fail — for example, private / unlisted prints
-> where Printables rejects anonymous download attempts with
-> `files_cannot_be_downloaded`. For those, you can supply a Printables
-> session cookie via `PRINTABLES_SESSION_COOKIE` (see below).
->
-> **How it works internally:**
-> 1. Plugin calls the public GraphQL `print(id: $id)` query → gets the
->    print metadata and the list of files (`stls`, `slas`, `gcodes`,
->    `otherFiles`) with their internal file IDs.
-> 2. For each file, plugin calls the `getDownloadLink` mutation
->    → gets a 24-hour signed CDN URL on `files.printables.com`.
-> 3. Manyfold downloads the file from the signed URL.
->
-> Why we don't use the printables.com website's "Download all" zip:
-> Printables doesn't expose a public zip-download endpoint. The website's
-> "Download all" button hits an internal API endpoint that requires
-> authentication and is rate-limited per user — not suitable for a
-> server-side plugin.
+> **Works without authentication** for every public print we tested — both
+> old (pre-2024) and new (post-2024) layouts, all file extensions. For
+> private / unlisted prints that return `files_cannot_be_downloaded`, see
+> the optional cookie instructions in [Installation](#installation).
 
 ## What it does
 
@@ -48,12 +31,12 @@ Printables' public GraphQL API.
 - **Creator URLs** like `https://www.printables.com/@100prznt` are matched too:
   importing one creates a Creator record linked back to the Printables profile.
 - **Visible on `/imports/new`** — the plugin prepends a copy of Manyfold's
-  imports/new view (`app/views/imports/new.html.erb`) with a `✅ Printables`
-  entry added to the Supported Sites sidebar. No API key is required, so the
-  indicator is always ✅ when the plugin is loaded.
+  imports/new view with a `✅ Printables` entry added to the Supported
+  Sites sidebar. No API key is required, so the indicator is always ✅ when
+  the plugin is loaded.
 - **No API key is required** — Printables' GraphQL endpoint is public.
-- File downloads go through the public `media.printables.com` CDN, so no
-  authentication is needed for individual files either.
+- **File downloads use 24-hour signed CDN URLs** obtained from the
+  `getDownloadLink` mutation. The plugin never stores credentials.
 
 ## Installation
 
@@ -69,12 +52,14 @@ Printables' public GraphQL API.
 
 ### Optional: authenticated downloads for private prints
 
-The `getDownloadLink` GraphQL mutation used by this plugin works **without
-authentication** for every public print we've tested — including all `.stl`,
-`.3mf`, `.stp`, `.obj`, and `.gcode` files on every print, both old (pre-2024)
-and new (post-2024) layouts. For private / unlisted prints that return
-`files_cannot_be_downloaded`, you can supply a Printables session cookie to
-Manyfold:
+The `getDownloadLink` mutation works **without authentication** for every
+public print we've tested — including all `.stl`, `.3mf`, `.stp`, `.obj`,
+and `.gcode` files on every print, both old (pre-2024) and new (post-2024)
+layouts.
+
+For private / unlisted prints that return `files_cannot_be_downloaded`,
+you can supply a Printables session cookie so the plugin can fetch those
+files:
 
 1. Log in to printables.com in your browser.
 2. Open DevTools → Network → click any printables.com request → Headers →
