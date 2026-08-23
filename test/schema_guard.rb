@@ -71,6 +71,15 @@ Integrations::Printables::BaseDeserializer.class_eval do
   define_method(:graphql) { |_q, _v = {}| {"print" => fake_data} }
 end
 
+# Stub get_download_url so the schema guard test doesn't make real
+# network calls (it doesn't need to verify CDN URLs — it only checks
+# that the deserializer's output uses valid Model column names).
+Integrations::Printables::ModelDeserializer.class_eval do
+  define_method(:get_download_url) do |file_id:, file_type:|
+    "https://files.printables.com/stls/#{file_id}/test.stl"
+  end
+end
+
 md = Integrations::Printables::ModelDeserializer.new(uri: "https://www.printables.com/model/46705")
 result = md.deserialize
 

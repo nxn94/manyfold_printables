@@ -1,17 +1,8 @@
-# Regression test: a print whose preview paths live under a UUID-based
-# /previews/ directory (the newer Printables CDN layout used since ~2024).
-# Every entry must produce a derived URL — even though the URL will 404
-# when HEAD-checked, the deserializer must not silently drop the entry
-# the way the old /stls/-only filter did.
-#
-# The test asserts:
-#   1. The deserializer doesn't raise on this input shape.
-#   2. Every entry's derived URL contains the real filename.
-#   3. When the CDN HEAD returns 404 (as it does in real life for these
-#      prints), the entry is skipped with a clear log line.
-#   4. The printables print 1419917-funnel-set-multi-size (which the user
-#      reported as broken before this fix) reproduces the bug if the
-#      /stls/ filter is reintroduced.
+# Regression test: the funnel-set-multi-size print, which was the original
+# failing case. Now that we use getDownloadLink for file URLs (which returns
+# signed CDN URLs without needing auth), this print should produce
+# file_urls entries for ALL its STLs and the 3MF — no more "not publicly
+# downloadable" errors.
 
 $LOAD_PATH.unshift("/tmp/manyfold-research/manyfold/app/deserializers")
 
@@ -33,7 +24,6 @@ module Faraday
 end
 module ManyfoldPrintables; VERSION = "0.1.0"; end
 
-# Stub Rails.logger
 module Rails
   def self.logger
     @logger ||= Class.new {
@@ -46,28 +36,15 @@ module Rails
   end
 end
 
-# Stub Net::HTTP.head to return 404 for ALL URLs (simulating "file not
-# publicly downloadable from the CDN" — which is what happens for the
-# funnel-set-multi-size print and many newer prints).
-class Net::HTTP
-  alias_method :_orig_head_for_uuid_test, :head
-  def head(_path)
-    response = Object.new
-    response.define_singleton_method(:code) { "404" }
-    response
-  end
-end
-
 PLUGIN = File.expand_path("../app/deserializers/integrations/printables", __dir__)
 require "#{PLUGIN}/base_deserializer.rb"
 require "#{PLUGIN}/model_deserializer.rb"
 require "#{PLUGIN}/creator_deserializer.rb"
 
-# Real data shape from print 1419917-funnel-set-multi-size. Note: the
-# preview paths live under /previews/<uuid>/<uuid>.png with a UUID-named
-# parent directory, NOT under /stls/<uuid>/<name>_preview.png. Every entry
-# must still produce a derived URL so the HEAD check can decide whether
-# the file is downloadable.
+# Real data shape from print 1419917-funnel-set-multi-size. The original
+# problem: preview paths under /previews/ meant the old URL-derivation
+# logic couldn't find working URLs. With getDownloadLink, this is no
+# longer an issue — every file gets a proper signed URL.
 data = {
   "id" => "1419917",
   "name" => "Funnel Set - Multi-Size",
@@ -82,12 +59,17 @@ data = {
     {"id" => "1", "filePath" => "media/prints/eecc8fa9-60f5-4315-a020-23cb6aa0efe0/images/img_9267.jpg"}
   ],
   "stls" => [
-    {"id" => "1", "name" => "funnel60.stl", "filePreviewPath" => "media/prints/eecc8fa9-60f5-4315-a020-23cb6aa0efe0/previews/0cbc0b16-e648-4de9-b086-551f96f006e3.png"},
-    {"id" => "2", "name" => "funnel25.stl", "filePreviewPath" => "media/prints/c2b6ca98-ce87-4dc9-b833-5cb7d91e4903/previews/802696a3-70df-438b-a727-bf300445f029.png"},
-    {"id" => "3", "name" => "funnel_set.3mf", "filePreviewPath" => "media/prints/71fbbbb0-ed06-4c2a-ac6a-d54e07560007/previews/58796876-5ff6-407c-bd4f-a9fda1e0c030.png"},
+    {"id" => "1", "name" => "funnel60.stl", "fileSize" => 118784, "filePreviewPath" => "x"},
+    {"id" => "2", "name" => "funnel25.stl", "fileSize" => 196984, "filePreviewPath" => "x"},
+    {"id" => "3", "name" => "funnel15.stl", "fileSize" => 227884, "filePreviewPath" => "x"},
+    {"id" => "4", "name" => "funnel30.stl", "fileSize" => 144684, "filePreviewPath" => "x"},
+    {"id" => "5", "name" => "funnel_set.3mf", "fileSize" => 283788, "filePreviewPath" => "x"},
+    {"id" => "6", "name" => "funnel45.stl", "fileSize" => 132984, "filePreviewPath" => "x"},
+    {"id" => "7", "name" => "funnel100.stl", "fileSize" => 120784, "filePreviewPath" => "x"}
   ],
   "slas" => [],
   "gcodes" => [],
+  "otherFiles" => [],
   "user" => {"id" => "1", "handle" => "h", "publicUsername" => "h", "avatarFilePath" => nil}
 }
 
@@ -95,38 +77,47 @@ Integrations::Printables::BaseDeserializer.class_eval do
   define_method(:graphql) { |_q, _v = {}| {"print" => data} }
 end
 
+# Stub get_download_url to return a working signed URL for every file.
+Integrations::Printables::ModelDeserializer.class_eval do
+  define_method(:get_download_url) do |file_id:, file_type:|
+    "https://files.printables.com/stls/#{file_id}/test.stl"
+  end
+end
+
 md = Integrations::Printables::ModelDeserializer.new(uri: "https://www.printables.com/model/1419917-funnel-set-multi-size")
 result = md.deserialize
 
 failures = []
 
-# Sanity: deserializer didn't raise.
 puts "name: #{result[:name]}"
 puts "file_urls: #{result[:file_urls].size} entries"
+result[:file_urls].each { |e| puts "  #{e[:filename]} -> #{e[:url][0,80]}" }
 
-# The image is from /images/ (no HEAD check), so it should be present.
+# 7 files (6 STL + 1 3MF) + 1 image = 8 file_urls entries
+file_count = result[:file_urls].count { |e| e[:filename].start_with?("files/") }
+failures << "expected 7 file entries, got #{file_count}" unless file_count == 7
+
 img_count = result[:file_urls].count { |e| e[:filename].start_with?("images/") }
 failures << "expected 1 image entry, got #{img_count}" unless img_count == 1
 
-# The 3 STL/3MF entries all return 404 from the CDN, so they should be
-# skipped (file_urls has only the image). Verify this is happening via the
-# log message.
-log = Rails.logger.messages
-skip_logs = log.select { |m| m.include?("skipping") && m.include?("404") }
-puts "skip messages: #{skip_logs.size}"
-skip_logs.each { |m| puts "  #{m[0,140]}" }
-failures << "expected 3 skip log messages, got #{skip_logs.size}" unless skip_logs.size == 3
+# All file URLs must be on files.printables.com (signed CDN URL host)
+files_urls = result[:file_urls].select { |e| e[:url].to_s.start_with?("https://files.printables.com") }
+failures << "no files.printables.com URLs in result, got #{result[:file_urls].map { |e| e[:url][0,40] }}" if files_urls.empty?
 
-# And the actual file_urls should NOT contain any .stl or .3mf entries
-# (they were all 404'd).
-stl_entries = result[:file_urls].select { |e| e[:filename].end_with?(".stl", ".3mf") }
-failures << "expected no .stl/.3mf entries (all CDN 404'd), got #{stl_entries.size}: #{stl_entries.map { |e| e[:filename] }}" unless stl_entries.empty?
+# No skip messages — getDownloadLink returns ok=true for everything.
+log = Rails.logger.messages
+skip_logs = log.select { |m| m.include?("skipping") }
+failures << "expected no skip messages, got #{skip_logs.size}: #{skip_logs}" unless skip_logs.empty?
+
+# 3MF file is included — not silently dropped like the old code did.
+three_mf = result[:file_urls].find { |e| e[:filename] == "files/funnel_set.3mf" }
+failures << "3MF entry missing" if three_mf.nil?
 
 if failures.empty?
-  puts "\n✓ UUID-based /previews/ CDN layout is handled correctly"
-  puts "  - deserializer produces derived URLs for all entries"
-  puts "  - HEAD-check rejects 404s with clear log messages"
-  puts "  - Only downloadable files end up in file_urls"
+  puts "\n✓ funnel-set-multi-size import is fully covered:"
+  puts "  - All 7 file entries (6 STL + 1 3MF) get signed URLs via getDownloadLink"
+  puts "  - 1 image entry from media.printables.com"
+  puts "  - No 'skipping' log lines (everything downloads)"
 else
   puts "\n✗ FAILURES:"
   failures.each { |f| puts "  - #{f}" }

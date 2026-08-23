@@ -1,20 +1,18 @@
-# Test: print with only 3MF under /previews/ (not CDN-downloadable) gets
-# the 3MF entry skipped via HEAD check, with a clear log message.
+# Test: the deserializer correctly handles the case where some files
+# in a print return ok=false from getDownloadLink. The print still
+# imports (metadata, tags, license, images, etc.) but those files are
+# skipped with a clear log message.
 
 $LOAD_PATH.unshift("/tmp/manyfold-research/manyfold/app/deserializers")
 
 module Integrations
   class BaseDeserializer
-    attr_reader :uri
-    def initialize(uri:); @uri = canonicalize(uri); end
-    def valid?(for_class: nil); api_configured? && !uri.nil? && (for_class ? for_class == capabilities[:class] : true); end
+    def initialize(uri:); @uri = uri; end
+    def valid?(for_class: nil); !@uri.nil?; end
     def deserialize; raise NotImplementedError; end
     def capabilities; raise NotImplementedError; end
     private
-    def api_configured?; raise NotImplementedError; end
-    def canonicalize(uri); raise NotImplementedError; end
     def attempt_creator_match(attrs); {creator_attributes: attrs}; end
-    def filename_from_url(url); return nil if url.nil? || url.to_s.empty?; CGI.unescape(URI.parse(url).path).split("/").last; end
   end
 end
 class Model; end; class Creator; end
@@ -25,7 +23,6 @@ module Faraday
 end
 module ManyfoldPrintables; VERSION = "0.1.0"; end
 
-# Stub Rails.logger to capture log output
 module Rails
   def self.logger
     @logger ||= Class.new {
@@ -38,71 +35,77 @@ module Rails
   end
 end
 
-# Stub Net::HTTP BEFORE loading plugin files. HEAD returns 200 for .stl, 404 for anything else.
-class Net::HTTP
-  alias_method :_orig_head, :head
-  def head(path)
-    response = Object.new
-    response.define_singleton_method(:code) { path.include?(".stl") ? "200" : "404" }
-    response
-  end
-end
-
-PLUGIN = "/home/nxn/projects/manyfold_printables/app/deserializers/integrations/printables"
+PLUGIN = File.expand_path("../app/deserializers/integrations/printables", __dir__)
 require "#{PLUGIN}/base_deserializer.rb"
 require "#{PLUGIN}/model_deserializer.rb"
 require "#{PLUGIN}/creator_deserializer.rb"
 
-# Now stub graphql to return a print that has both an STL (downloadable) and a 3MF (not).
+data = {
+  "id" => "99999",
+  "name" => "Mixed Files Test",
+  "slug" => "mixed-files",
+  "summary" => "test",
+  "description" => "...",
+  "nsfw" => false,
+  "tags" => [],
+  "license" => {"id" => "1", "name" => "x"},
+  "image" => {"id" => "1", "filePath" => "media/prints/abc/images/x/y.jpg"},
+  "images" => [
+    {"id" => "1", "filePath" => "media/prints/abc/images/x/y.jpg"}
+  ],
+  "stls" => [
+    # Two STLs that getDownloadLink works for, one that fails.
+    {"id" => "1", "name" => "thing_a.stl", "fileSize" => 100},
+    {"id" => "2", "name" => "thing_b.stl", "fileSize" => 100},
+    {"id" => "3", "name" => "thing_c.stl", "fileSize" => 100}
+  ],
+  "slas" => [],
+  "gcodes" => [],
+  "otherFiles" => [],
+  "user" => {"id" => "1", "handle" => "h", "publicUsername" => "h", "avatarFilePath" => nil}
+}
+
 Integrations::Printables::BaseDeserializer.class_eval do
-  define_method(:graphql) do |_q, _v = {}|
-    {"print" => {
-      "id" => "99999",
-      "name" => "Test Print With 3MF",
-      "slug" => "test-print-3mf",
-      "summary" => "",
-      "description" => "",
-      "nsfw" => false,
-      "tags" => [],
-      "license" => {"id" => "1", "name" => "X"},
-      "image" => {"id" => "1", "filePath" => "media/prints/99999/images/x/y.jpg"},
-      "images" => [{"id" => "1", "filePath" => "media/prints/99999/images/x/y.jpg"}],
-      "stls" => [
-        # Real STL
-        {"id" => "1", "name" => "thing.stl", "filePreviewPath" => "media/prints/99999/stls/uuid/thing_preview.png"},
-        # 3MF under /stls/ — derived URL 404s per our CDN test
-        {"id" => "2", "name" => "thing.3mf", "filePreviewPath" => "media/prints/99999/stls/uuid/thing_preview.png"},
-      ],
-      "slas" => [],
-      "gcodes" => [],
-      "user" => {"id" => "1", "handle" => "h", "publicUsername" => "h", "avatarFilePath" => nil}
-    }}
+  define_method(:graphql) { |_q, _v = {}| {"print" => data} }
+end
+
+# Stub get_download_url to fail for file_id=2 only
+Integrations::Printables::ModelDeserializer.class_eval do
+  define_method(:get_download_url) do |file_id:, file_type:|
+    if file_id == "2"
+      nil  # Simulates getDownloadLink returning ok=false
+    else
+      "https://files.printables.com/stls/#{file_id}/test.stl"
+    end
   end
 end
 
-md = Integrations::Printables::ModelDeserializer.new(uri: "https://www.printables.com/model/99999-test-print-3mf")
+md = Integrations::Printables::ModelDeserializer.new(uri: "https://www.printables.com/model/99999-test")
 result = md.deserialize
 
 failures = []
 
-puts "Total file_urls: #{result[:file_urls].size}"
-result[:file_urls].each { |e| puts "  #{e[:filename]} -> #{e[:url][0,100]}" }
+# Two of three STLs should appear (file_id=2 fails).
+stl_entries = result[:file_urls].select { |e| e[:filename].start_with?("files/") }
+failures << "expected 2 file entries (file_id=2 skipped), got #{stl_entries.size}" unless stl_entries.size == 2
+failures << "expected entries for thing_a.stl and thing_c.stl, got #{stl_entries.map { |e| e[:filename] }}" unless stl_entries.map { |e| e[:filename] }.sort == ["files/thing_a.stl", "files/thing_c.stl"]
 
-# Expected: 1 STL accepted, 1 3MF rejected via HEAD, 1 image accepted = 2 entries
-failures << "expected 2 file entries (1 STL + 1 image, 3MF skipped), got #{result[:file_urls].size}" unless result[:file_urls].size == 2
+# The image is still present.
+img_entries = result[:file_urls].select { |e| e[:filename].start_with?("images/") }
+failures << "expected 1 image entry, got #{img_entries.size}" unless img_entries.size == 1
 
-# The 3MF should have been skipped with a clear log message
+# Skip message logged for the failed file.
 log = Rails.logger.messages
-skipped_logs = log.select { |m| m.include?("skipping") && m.include?(".3mf") }
-puts "Skip log messages:"
-skipped_logs.each { |m| puts "  #{m[0,200]}" }
-failures << "expected 1 skip log message for 3MF, got #{skipped_logs.size}" unless skipped_logs.size == 1
+skip_logs = log.select { |m| m.include?("skipping") && m.include?("thing_b.stl") }
+failures << "expected skip log for thing_b.stl, got: #{log.inspect}" unless skip_logs.size == 1
 
 if failures.empty?
-  puts "\n✓ 3MF skip via HEAD check works correctly."
-  puts "  - STL accepted, 3MF skipped with log message"
+  puts "✓ getDownloadLink ok=false is handled correctly:"
+  puts "  - 2 of 3 STLs imported (third one skipped)"
+  puts "  - Image still imported"
+  puts "  - Skip message logged with file name"
 else
-  puts "\n✗ FAILURES:"
+  puts "✗ FAILURES:"
   failures.each { |f| puts "  - #{f}" }
   exit 1
 end

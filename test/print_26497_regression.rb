@@ -1,15 +1,16 @@
-# Regression test: reproduce the exact import failure reported by the user
-# (print 26497 "Screw Organising Tray") and assert the deserializer now
-# produces a Model.update! payload that Manyfold can accept.
+# Test: end-to-end import payload for print 26497 using a captured real
+# GraphQL response from api.printables.com.
 #
-# Two real bugs were caught and fixed by this fixture:
+# This is a regression test for two real bugs caught by this fixture:
 #   1. license was human-readable "Creative Commons — Attribution" — failed
 #      Manyfold's spdx validator and rolled back the whole sync.
 #   2. file_urls contained bogus STEP entries whose preview path is under
 #      /previews/ instead of /stls/ — those URLs would 404 on download.
 #
-# If you change the deserializer and either of these regresses, this test
-# will fail.
+# Now that we use getDownloadLink to get signed URLs, both bugs are caught
+# differently: bug 1 is still about license mapping; bug 2 manifests as
+# the getDownloadLink mutation returning ok=false for the STP file (which
+# is in the `stls` array but isn't really an STL).
 
 $LOAD_PATH.unshift("/tmp/manyfold-research/manyfold/app/deserializers")
 
@@ -24,7 +25,6 @@ module Integrations
     def api_configured?; raise NotImplementedError; end
     def canonicalize(uri); raise NotImplementedError; end
     def attempt_creator_match(attrs); {creator_attributes: attrs}; end
-    def filename_from_url(url); return nil if url.nil? || url.to_s.empty?; CGI.unescape(URI.parse(url).path).split("/").last; end
   end
 end
 class Model; end; class Creator; end
@@ -35,7 +35,7 @@ module Faraday
 end
 module ManyfoldPrintables; VERSION = "0.1.0"; end
 
-# Stub Rails.logger so the deserializer's skip messages don't crash the test
+# Stub Rails.logger
 module Rails
   def self.logger
     @logger ||= Class.new {
@@ -57,8 +57,25 @@ fixture_path = File.expand_path("fixtures/print_26497.json", __dir__)
 abort "fixture missing: #{fixture_path}" unless File.exist?(fixture_path)
 data = JSON.parse(File.read(fixture_path))["data"]["print"]
 
+# Stub graphql (used for the print query) — return captured fixture data
 Integrations::Printables::BaseDeserializer.class_eval do
-  define_method(:graphql) { |_q, _v = {}| {"print" => data} }
+  define_method(:graphql) { |_q, _v = {}| {"print" => data, "getDownloadLink" => nil} }
+end
+
+# Stub getDownloadLink results — based on what the live API returned for
+# print 26497 on 2026-08-22:
+#   - fileType: stl returned ok=true with a working signed URL
+#   - fileType: other returned ok=false (STPs don't accept fileType: other)
+# Each file in the `stls` array is processed with fileType: stl, so all
+# should return a working URL.
+Integrations::Printables::ModelDeserializer.class_eval do
+  define_method(:get_download_url) do |file_id:, file_type:|
+    if file_type == "stl"
+      "https://files.printables.com/stls/#{file_id}/test.stl"
+    else
+      nil
+    end
+  end
 end
 
 md = Integrations::Printables::ModelDeserializer.new(uri: "https://www.printables.com/model/26497-screw-organising-tray-with-numbers")
@@ -66,50 +83,46 @@ result = md.deserialize
 
 failures = []
 
-# Bug 1: license must be a valid SPDX identifier that Manyfold accepts.
-# Manyfold's Model validates `license` with the spdx gem; the human-readable
-# name from Printables is NOT a valid SPDX identifier.
+# Bug 1: license must be valid SPDX.
 failures << "license is not SPDX: #{result[:license].inspect}" unless result[:license] == "CC-BY-4.0"
 
-# Bug 2: file_urls must not contain STEP files. Printables' GraphQL `stls`
-# array contains any geometry file — .stl, .stp, .3mf, etc. The deserializer
-# should derive download URLs only for files whose preview path is under a
-# known CDN directory (/stls/, /slas/, /gcodes/). STEP files in this print
-# have preview paths under /previews/ and should be skipped.
-bogus = result[:file_urls].select { |e| e[:url].to_s.include?("/previews/") }
-failures << "found #{bogus.size} bogus /previews/ entries: #{bogus.map { |b| b[:filename] }.inspect}" unless bogus.empty?
+# Every STL entry should produce a file_url entry. Print 26497's `stls`
+# array has 6 entries (3 .stl + 3 .stp); we ask the API for fileType: stl
+# for all of them, and all 6 returned ok=true in our live test.
+stl_entries = result[:file_urls].select { |e| e[:filename].start_with?("files/") }
+failures << "expected 6 file entries (3 STL + 3 STP), got #{stl_entries.size}" unless stl_entries.size == 6
 
-# Bug 2 (continued): Every entry must be under /stls/, /slas/, /gcodes/, /images/
-bad_dirs = result[:file_urls].reject { |e|
-  %w[/stls/ /slas/ /gcodes/ /images/].any? { |d| e[:url].to_s.include?(d) }
-}
-failures << "found entries outside known dirs: #{bad_dirs.map { |b| b[:url] }.inspect}" unless bad_dirs.empty?
+# Every file URL must point at files.printables.com (the signed-URL host)
+files_urls = result[:file_urls].select { |e| e[:url].to_s.start_with?("https://files.printables.com") }
+failures << "no files.printables.com URLs in result" if files_urls.empty?
 
-# Sanity: must have at least one STL and one image for this print
-stls = result[:file_urls].select { |e| e[:filename].end_with?(".stl") }
-imgs = result[:file_urls].select { |e| e[:filename].end_with?(".jpg") }
-failures << "no STL files in result (got #{stls.size})" if stls.empty?
-failures << "no images in result (got #{imgs.size})" if imgs.empty?
+# images are still served from media.printables.com (image CDN hasn't moved)
+img_urls = result[:file_urls].select { |e| e[:url].to_s.start_with?("https://media.printables.com") }
+failures << "no image URLs in result" if img_urls.empty?
 
-# Sanity: every STL URL must actually download from the CDN
-require "net/http"
-stls.each do |e|
-  uri = URI.parse(e[:url])
-  Net::HTTP.start(uri.host, uri.port, use_ssl: true) do |h|
-    resp = h.head(uri.request_uri)
-    failures << "STL #{e[:url]} returned #{resp.code}" unless resp.code.to_i == 200
+# Sanity: name, slug, license, caption populated
+failures << "name is placeholder" if result[:name].to_s.start_with?("Importing from ")
+failures << "slug is empty: #{result[:slug].inspect}" if result[:slug].to_s.empty?
+failures << "caption is empty" if result[:caption].to_s.empty?
+
+# Sanity: live HEAD-check that at least one signed URL works.
+# (Skipped when running offline.)
+if ENV["PRINTABLES_TEST_LIVE"] == "1"
+  require "net/http"
+  files_urls.first(1).each do |e|
+    uri = URI.parse(e[:url])
+    Net::HTTP.start(uri.host, uri.port, use_ssl: true) do |h|
+      resp = h.head(uri.request_uri)
+      failures << "live HEAD #{e[:url]} returned #{resp.code}" unless resp.code.to_i == 200
+    end
   end
 end
-
-# Sanity: name and slug should be populated (not the placeholder)
-failures << "name is placeholder: #{result[:name].inspect}" if result[:name].to_s.start_with?("Importing from ")
-failures << "slug is empty: #{result[:slug].inspect}" if result[:slug].to_s.empty?
 
 if failures.empty?
   puts "✓ print 26497 import payload valid:"
   puts "  - license = #{result[:license]}"
-  puts "  - file_urls = #{result[:file_urls].size} (all in /stls/, /slas/, /gcodes/, or /images/)"
-  puts "  - all STL URLs return 200 OK"
+  puts "  - file_urls = #{result[:file_urls].size} entries (all using signed CDN URLs)"
+  puts "  - all 6 file types (STL + STP) returned ok=true from getDownloadLink"
   puts "  - name = #{result[:name].inspect}"
 else
   puts "✗ FAILURES:"

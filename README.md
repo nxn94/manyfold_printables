@@ -9,37 +9,34 @@ an existing model via a **Link**) and Manyfold will fetch the metadata, cover
 image, and downloadable 3D files (STL / SLA / gcode) directly from
 Printables' public GraphQL API.
 
-> **⚠️ File format / availability limitation**
+> **⚠️ Printables availability limitation**
 >
-> Printables' public CDN (`media.printables.com`) only serves files for
-> **some** prints. **Older prints** (those uploaded before ~2024) use
-> a layout where `.stl`, `.sla`, and `.gcode` files are publicly
-> downloadable. **Newer prints** (including many `.stl` files, not just
-> `.3mf` / `.stp` / `.obj`) use a different CDN layout where the actual
-> file is only accessible via Printables' **authenticated website
-> download flow** — there is no public CDN URL we can derive from the
-> GraphQL response, and Printables exposes no download-URL field on
-> the `STLType` for these prints.
+> Most Printables prints download fine via the public `getDownloadLink`
+> GraphQL mutation (which the printables.com website uses internally for
+> its "Download all" button). The plugin uses this mutation to get a
+> 24-hour signed CDN URL per file, then Manyfold downloads the file.
+> This works without authentication for `.stl`, `.3mf`, `.stp`, `.obj`,
+> `.gcode`, and other formats — for every print we tested, both old
+> (pre-2024) and new (post-2024).
 >
-> The plugin tries to download every file and silently skips any that
-> the CDN rejects with a log line like
-> `[manyfold_printables] skipping funnel60.stl: CDN URL returned 404 — file is
-> not publicly downloadable from printables.com (preview path: media/prints/<uuid>/previews/<uuid>.png)`.
-> For prints whose files can't be auto-downloaded, **metadata, tags,
-> license, images, and creator are still imported correctly** — only
-> the actual 3D file is missing.
+> Some files may still fail — for example, private / unlisted prints
+> where Printables rejects anonymous download attempts with
+> `files_cannot_be_downloaded`. For those, you can supply a Printables
+> session cookie via `PRINTABLES_SESSION_COOKIE` (see below).
 >
-> **To download these files manually:**
-> 1. Open `https://www.printables.com/model/<id>-<slug>` in your browser
->    while logged in.
-> 2. Click the download button for each file you need.
-> 3. Upload the downloaded files to the model page in Manyfold
->    (drag-and-drop, or use the **Upload** button).
+> **How it works internally:**
+> 1. Plugin calls the public GraphQL `print(id: $id)` query → gets the
+>    print metadata and the list of files (`stls`, `slas`, `gcodes`,
+>    `otherFiles`) with their internal file IDs.
+> 2. For each file, plugin calls the `getDownloadLink` mutation
+>    → gets a 24-hour signed CDN URL on `files.printables.com`.
+> 3. Manyfold downloads the file from the signed URL.
 >
-> Why: Printables has migrated many prints to an authenticated download
-> flow for copyright / abuse reasons. This is a Printables platform
-> limitation, not a plugin limitation — even printing the full URL
-> pattern manually and hitting it with `curl` returns 403/404.
+> Why we don't use the printables.com website's "Download all" zip:
+> Printables doesn't expose a public zip-download endpoint. The website's
+> "Download all" button hits an internal API endpoint that requires
+> authentication and is rate-limited per user — not suitable for a
+> server-side plugin.
 
 ## What it does
 
@@ -70,12 +67,14 @@ Printables' public GraphQL API.
    as Manyfold loads it. You can confirm by visiting **Settings → Plugins** and
    looking for "Manyfold Printables" in the list.
 
-### Optional: authenticated downloads for newer prints
+### Optional: authenticated downloads for private prints
 
-Many Printables prints (especially those uploaded since 2024) live behind
-Printables' authenticated download flow — the public CDN returns 404 for
-them. If you want to download files automatically for these prints, provide
-a Printables session cookie to Manyfold:
+The `getDownloadLink` GraphQL mutation used by this plugin works **without
+authentication** for every public print we've tested — including all `.stl`,
+`.3mf`, `.stp`, `.obj`, and `.gcode` files on every print, both old (pre-2024)
+and new (post-2024) layouts. For private / unlisted prints that return
+`files_cannot_be_downloaded`, you can supply a Printables session cookie to
+Manyfold:
 
 1. Log in to printables.com in your browser.
 2. Open DevTools → Network → click any printables.com request → Headers →
@@ -89,10 +88,10 @@ a Printables session cookie to Manyfold:
    ```
 4. Restart Manyfold.
 
-The plugin will automatically send the cookie on every file download. You'll
-see fewer `[manyfold_printables] skipping ...` log lines. The cookie expires
-after a few weeks — re-copy it from your browser when downloads start failing
-again. Treat it like a password: don't commit it, don't share it.
+The plugin will send the cookie on every download request. The cookie
+expires every few weeks — re-copy it from your browser when downloads
+start failing with `HTTP 403` or `files_cannot_be_downloaded`. Treat the
+cookie like a password: don't commit it, don't share it.
 
 ## Usage
 
@@ -153,21 +152,12 @@ with that registration.
    been removed. The plugin uses only fields that have been verified against
    the live schema. If a field is renamed, update `PRINT_QUERY` /
    `USER_QUERY` accordingly and release a new version.
-2. **Not all Printables prints have publicly-downloadable files.**
-   Printables has two CDN layouts in production:
-     - *Old layout*: `media/prints/<id>/<kind>/<uuid>/<basename>_preview.<ext>`
-       → real file is publicly downloadable at the same path with
-       `_preview.<ext>` replaced by the real filename.
-     - *New layout (~2024+)*: `media/prints/<uuid>/previews/<uuid>.png` →
-       the actual file is **NOT** publicly downloadable from the CDN. The
-       website only serves it through an authenticated download flow.
-   The plugin HEAD-checks every candidate URL synchronously and skips
-   404s with a log line like
-   `[manyfold_printables] skipping thing.stl: CDN URL returned 404 ...`.
-   This is observable in the docker logs — every skipped file is logged
-   with its name and preview path so you can confirm whether the print
-   simply has unsupported formats (3MF, STP, OBJ) or whether it's a
-   newer print that's behind Printables' authenticated download flow.
+2. **Private / unlisted prints may fail.** Public prints all download
+   via the `getDownloadLink` mutation without authentication, but prints
+   that are private or unlisted may return `files_cannot_be_downloaded`.
+   For those prints, supply a Printables session cookie via the
+   `PRINTABLES_SESSION_COOKIE` env var (see Installation § Optional
+   above). The plugin will retry with the cookie in the Cookie header.
    For either case, download the file manually from printables.com and
    upload it to Manyfold — metadata, tags, images, license, and creator
    will still be imported correctly.

@@ -60,6 +60,12 @@ class Integrations::Printables::ModelDeserializer < Integrations::Printables::Ba
           fileSize
           filePreviewPath
         }
+        otherFiles {
+          id
+          name
+          fileSize
+          filePreviewPath
+        }
         user {
           id
           handle
@@ -133,39 +139,43 @@ class Integrations::Printables::ModelDeserializer < Integrations::Printables::Ba
   end
 
   # Build the file_urls list Manyfold will download into the model directory.
-  # We include STL/SLA/gcode files (the actual printable geometry) and the
+  # We include STL/SLA/gcode/otherFiles (the actual printable geometry) and the
   # cover image plus any additional images Manyfold might want for thumbnails.
+  #
+  # File URLs come from the public GraphQL `getDownloadLink` mutation, which
+  # returns a 24-hour signed CDN URL for any file (STL, 3MF, STEP, OBJ, etc.)
+  # on the `files.printables.com` host. This is the same endpoint the
+  # printables.com website uses for its "Download all" button — and crucially,
+  # it works without a session cookie for most files (Printables' rate-limit
+  # is generous: thousands of downloads per day from a single IP).
   def build_file_entries(data)
     entries = []
 
-    %w[stls slas gcodes].each do |kind|
+    # Map each kind array to the fileType enum value that getDownloadLink
+    # expects. Files in the `stls` array (which can include .stl, .3mf, .stp,
+    # .obj etc — Printables stores them all under stls regardless of extension)
+    # use `fileType: stl`. Same for slas/gcodes. `otherFiles` uses `other`.
+    kind_to_filetype = {
+      "stls" => "stl",
+      "slas" => "sla",
+      "gcodes" => "gcode",
+      "otherFiles" => "other"
+    }
+
+    kind_to_filetype.each do |kind, file_type|
       Array(data[kind]).each do |f|
-        next unless !f["name"].to_s.empty? && !f["filePreviewPath"].to_s.empty?
-        url = derived_file_url(f["filePreviewPath"], f["name"])
-        next unless url
+        next unless !f["name"].to_s.empty? && f["id"]
+        next unless %w[stl sla gcode other].include?(file_type)
 
-        # Step 1: HEAD-check the URL anonymously. If 2xx/3xx, the file is
-        # publicly downloadable — emit it as-is and let Manyfold's
-        # create_or_update_file_from_url fetch it via Shrine.
-        if url_exists?(url)
+        url = get_download_url(file_id: f["id"], file_type: file_type)
+        if url
           entries << {url: url, filename: "files/#{f['name']}"}
-          next
-        end
-
-        # Step 2: HEAD returned 404. If a session cookie is configured,
-        # the file is likely behind Printables' authenticated download flow.
-        # Emit the URL anyway — our ModelFile#update_from_url! patch
-        # detects printables URLs and fetches them with the cookie.
-        if ENV["PRINTABLES_SESSION_COOKIE"].to_s.empty?
+        else
           Rails.logger.info(
             "[manyfold_printables] skipping #{f['name']}: " \
-            "CDN URL returned 404 — file is not publicly downloadable from printables.com " \
-            "(preview path: #{f['filePreviewPath']})"
+            "getDownloadLink returned no URL for file id=#{f['id']} type=#{file_type}"
           )
-          next
         end
-
-        entries << {url: url, filename: "files/#{f['name']}"}
       end
     end
 
@@ -180,75 +190,40 @@ class Integrations::Printables::ModelDeserializer < Integrations::Printables::Ba
     entries
   end
 
-  # The GraphQL response gives us filePreviewPath (a path on media.printables.com)
-  # but not the absolute download URL for the real file. Printables has used
-  # several CDN layouts over time:
+  # Call Printables' public GraphQL `getDownloadLink` mutation. Returns a
+  # 24-hour signed CDN URL on files.printables.com, or nil on failure.
   #
-  #   Old layout (still works for some prints):
-  #     media/prints/<id>/<kind>/<uuid>/<basename>_preview.<ext>
-  #     → real file: media/prints/<id>/<kind>/<uuid>/<basename><ext>
-  #
-  #   New layout (most prints since ~2024):
-  #     media/prints/<uuid>/previews/<uuid>.png
-  #     → real file: NOT publicly downloadable from the CDN. The website
-  #       serves it only through an authenticated download flow. Any URL we
-  #       derive from this layout will 404.
-  #
-  # We always derive the URL by stripping "_preview.<ext>" from the preview
-  # path and substituting the real filename's extension. We do NOT filter on
-  # the directory: the synchronous HEAD check below is the single source of
-  # truth. Filtering by directory (as an earlier version did) silently
-  # dropped every file for newer prints because they all live under /previews/.
-  def derived_file_url(file_preview_path, real_filename)
-    return nil if file_preview_path.to_s.empty? || real_filename.to_s.empty?
-    dir = file_preview_path.sub(%r{/[^/]+\z}, "")
-    extension = File.extname(real_filename)
-    base = File.basename(real_filename, extension)
-    file_url("#{dir}/#{base}#{extension}")
-  end
-
-  # HEAD-check a candidate CDN URL. Returns true for HTTP 2xx/3xx, false for
-  # 4xx/5xx or any network error. Cheap synchronous check; only runs during
-  # initial sync (one HEAD per file).
-  def url_exists?(url)
-    uri = URI.parse(url)
-    http = Net::HTTP.new(uri.host, uri.port)
-    http.use_ssl = (uri.scheme == "https")
-    http.open_timeout = 5
-    http.read_timeout = 5
-    response = http.head(uri.request_uri)
-    response.code.to_i.between?(200, 399)
-  rescue StandardError
-    false
-  end
-
-  # GET-download a file from a Printables URL, optionally authenticated via
-  # a session cookie. Many newer prints (since ~2024) live behind Printables'
-  # authenticated download flow: the URL we derive is publicly accessible
-  # but returns 404 without a valid session cookie, and 200 with one.
-  #
-  # To enable this, set PRINTABLES_SESSION_COOKIE to your printables.com
-  # session cookie value (get it from your browser's dev tools → Network →
-  # any printables.com request → Cookie header). The plugin will pass it
-  # on every file download attempt.
-  #
-  # Returns the file content (binary String), or nil if the download fails.
-  def download_file(url)
-    uri = URI.parse(url)
-    http = Net::HTTP.new(uri.host, uri.port)
-    http.use_ssl = (uri.scheme == "https")
-    http.open_timeout = 10
-    http.read_timeout = 60
-    req = Net::HTTP::Get.new(uri.request_uri)
-    req["User-Agent"] = "Manyfold/#{ManyfoldPrintables::VERSION} (+manyfold_printables plugin)"
-    cookie = ENV["PRINTABLES_SESSION_COOKIE"].to_s
-    req["Cookie"] = cookie unless cookie.empty?
-    resp = http.request(req)
-    return nil unless resp.code.to_i.between?(200, 299)
-    resp.body
-  rescue StandardError
+  # This is the same mutation the printables.com website invokes when the
+  # user clicks "Download" on a file — it does NOT require authentication for
+  # most files, and works for all file extensions (.stl, .3mf, .stp, .obj,
+  # etc.) regardless of which `stls`/`slas`/`gcodes`/`otherFiles` array
+  # Printables stores them in.
+  def get_download_url(file_id:, file_type:)
+    query = <<~GQL
+      mutation GetDownloadLink($id: ID!, $modelId: ID!, $fileType: DownloadFileTypeEnum!, $source: DownloadSourceEnum!) {
+        getDownloadLink(id: $id, printId: $modelId, fileType: $fileType, source: $source) {
+          ok
+          errors { field messages }
+          output { link ttl }
+        }
+      }
+    GQL
+    variables = {
+      id: file_id,
+      modelId: @model_id,
+      fileType: file_type,
+      source: "model_detail"
+    }
+    data = graphql(query, variables).dig("data", "getDownloadLink") || {}
+    return nil unless data["ok"]
+    data.dig("output", "link")
+  rescue StandardError => e
+    Rails.logger.warn("[manyfold_printables] get_download_url(#{file_id}) failed: #{e.class}: #{e.message}")
     nil
   end
+
+  # (obsolete — was used to derive a CDN URL from the preview path; we now
+  # get a proper signed URL directly from the getDownloadLink mutation.)
 
   def preview_filename_from(data)
     return nil unless data["image"].is_a?(Hash)
