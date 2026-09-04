@@ -4,6 +4,8 @@ A [Manyfold](https://manyfold.app) plugin that adds
 [Printables.com](https://www.printables.com) as an external site source, the
 same way the built-in Thingiverse and Cults3D integrations work.
 
+<img align="right" alt="Screenshot_20260905_005807" src="https://github.com/user-attachments/assets/64782c59-8a21-4a88-9dd9-683bc20af3dc" />
+
 Paste a Printables model or creator URL on the **Import** page (or attach it to
 an existing model via a **Link**) and Manyfold will fetch the metadata, cover
 image, and **downloadable 3D files** — including `.stl`, `.3mf`, `.stp`, `.obj`,
